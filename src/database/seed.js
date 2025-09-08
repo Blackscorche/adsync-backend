@@ -12,53 +12,53 @@ async function seedDatabase() {
 
     // Create admin user
     const adminResult = await pool.query(
-      `INSERT INTO users (email, password, first_name, last_name, phone, role, is_verified, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
        RETURNING id, email, role`,
-      ['admin@ivaamedia.com', adminPassword, 'Admin', 'User', '+855123456789', 'admin', true]
+      ['admin@ivaamedia.com', adminPassword, 'Admin User', 'admin', true]
     );
     console.log('✅ Admin user created:', adminResult.rows[0].email);
 
     // Create owner users
     const owner1Result = await pool.query(
-      `INSERT INTO users (email, password, first_name, last_name, phone, role, is_verified, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
        RETURNING id, email, role`,
-      ['owner1@example.com', ownerPassword, 'John', 'Doe', '+855123456790', 'owner', true]
+      ['owner1@example.com', ownerPassword, 'John Doe', 'owner', true]
     );
     console.log('✅ Owner user created:', owner1Result.rows[0].email);
 
     const owner2Result = await pool.query(
-      `INSERT INTO users (email, password, first_name, last_name, phone, role, is_verified, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
        RETURNING id, email, role`,
-      ['owner2@example.com', ownerPassword, 'Jane', 'Smith', '+855123456791', 'owner', true]
+      ['owner2@example.com', ownerPassword, 'Jane Smith', 'owner', true]
     );
     console.log('✅ Owner user created:', owner2Result.rows[0].email);
 
     // Create sales user
     const salesResult = await pool.query(
-      `INSERT INTO users (email, password, first_name, last_name, phone, role, is_verified, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
        RETURNING id, email, role`,
-      ['sales@ivaamedia.com', salesPassword, 'Sales', 'Rep', '+855123456792', 'sales', true]
+      ['sales@ivaamedia.com', salesPassword, 'Sales Rep', 'sales', true]
     );
     console.log('✅ Sales user created:', salesResult.rows[0].email);
 
     // Create shops for owners
     const shop1Result = await pool.query(
-      `INSERT INTO shops (owner_id, name, address, city, country, subscription_status, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      `INSERT INTO shops (owner_id, name, address, phone, subscription_status, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
        RETURNING id, name`,
-      [owner1Result.rows[0].id, 'Coffee Paradise', '123 Main Street', 'Phnom Penh', 'KH', 'trial']
+      [owner1Result.rows[0].id, 'Coffee Paradise', '123 Main Street, Phnom Penh, KH', '+855123456790', 'trial']
     );
     console.log('✅ Shop created:', shop1Result.rows[0].name);
 
     const shop2Result = await pool.query(
-      `INSERT INTO shops (owner_id, name, address, city, country, subscription_status, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      `INSERT INTO shops (owner_id, name, address, phone, subscription_status, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
        RETURNING id, name`,
-      [owner2Result.rows[0].id, 'Fashion Boutique', '456 River Road', 'Siem Reap', 'KH', 'active']
+      [owner2Result.rows[0].id, 'Fashion Boutique', '456 River Road, Siem Reap, KH', '+855123456791', 'active']
     );
     console.log('✅ Shop created:', shop2Result.rows[0].name);
 

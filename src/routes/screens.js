@@ -1,5 +1,5 @@
 const express = require('express');
-const db = require('../config/database');
+const pool = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -14,7 +14,7 @@ router.get('/shop/:shopId', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const result = await db.query(`
+    const result = await pool.query(`
       SELECT 
         s.*,
         p.name as playlist_name,
@@ -39,7 +39,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const screenId = req.params.id;
 
-    const result = await db.query(`
+    const result = await pool.query(`
       SELECT 
         s.*,
         sh.name as shop_name,
@@ -79,7 +79,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Check if device ID already exists
     if (deviceId) {
-      const existing = await db.query(
+      const existing = await pool.query(
         'SELECT id FROM screens WHERE device_id = $1',
         [deviceId]
       );
@@ -88,7 +88,7 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
-    const result = await db.query(
+    const result = await pool.query(
       'INSERT INTO screens (shop_id, name, location, device_id) VALUES ($1, $2, $3, $4) RETURNING *',
       [shopId, name, location, deviceId]
     );
@@ -107,7 +107,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const { name, location } = req.body;
 
     // Check ownership
-    const screenCheck = await db.query(`
+    const screenCheck = await pool.query(`
       SELECT s.*, sh.owner_id 
       FROM screens s 
       JOIN shops sh ON sh.id = s.shop_id 
@@ -123,7 +123,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const result = await db.query(
+    const result = await pool.query(
       'UPDATE screens SET name = $1, location = $2 WHERE id = $3 RETURNING *',
       [name, location, screenId]
     );
@@ -141,7 +141,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     const screenId = req.params.id;
 
     // Check ownership
-    const screenCheck = await db.query(`
+    const screenCheck = await pool.query(`
       SELECT s.*, sh.owner_id 
       FROM screens s 
       JOIN shops sh ON sh.id = s.shop_id 
@@ -157,7 +157,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    await db.query('DELETE FROM screens WHERE id = $1', [screenId]);
+    await pool.query('DELETE FROM screens WHERE id = $1', [screenId]);
 
     res.json({ message: 'Screen deleted successfully' });
   } catch (error) {
@@ -173,7 +173,7 @@ router.post('/:deviceId/heartbeat', async (req, res) => {
     const { currentContentId, appVersion, deviceInfo } = req.body;
 
     // Update screen status
-    const result = await db.query(`
+    const result = await pool.query(`
       UPDATE screens 
       SET 
         status = 'online',
@@ -188,7 +188,7 @@ router.post('/:deviceId/heartbeat', async (req, res) => {
     }
 
     // Get latest playlist for this screen
-    const playlistResult = await db.query(`
+    const playlistResult = await pool.query(`
       SELECT 
         p.id,
         p.name,

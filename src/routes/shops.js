@@ -1,5 +1,5 @@
 const express = require('express');
-const db = require('../config/database');
+const pool = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -7,7 +7,7 @@ const router = express.Router();
 // Get all shops (Admin only)
 router.get('/', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
-    const result = await db.query(`
+    const result = await pool.query(`
       SELECT 
         s.id, 
         s.name, 
@@ -42,7 +42,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const shopResult = await db.query(`
+    const shopResult = await pool.query(`
       SELECT 
         s.*,
         u.full_name as owner_name,
@@ -57,7 +57,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
 
     // Get screens for this shop
-    const screensResult = await db.query(
+    const screensResult = await pool.query(
       'SELECT * FROM screens WHERE shop_id = $1 ORDER BY name',
       [shopId]
     );
@@ -77,10 +77,10 @@ router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => 
   try {
     const { name, ownerEmail, ownerName, ownerPassword, address, phone } = req.body;
 
-    await db.query('BEGIN');
+    await pool.query('BEGIN');
 
     // Check if owner email exists
-    const existingUser = await db.query(
+    const existingUser = await pool.query(
       'SELECT id FROM users WHERE email = $1',
       [ownerEmail]
     );
@@ -94,7 +94,7 @@ router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => 
       const bcrypt = require('bcryptjs');
       const passwordHash = await bcrypt.hash(ownerPassword, 10);
       
-      const userResult = await db.query(
+      const userResult = await pool.query(
         'INSERT INTO users (email, password_hash, full_name, role) VALUES ($1, $2, $3, $4) RETURNING id',
         [ownerEmail, passwordHash, ownerName, 'owner']
       );
@@ -102,16 +102,16 @@ router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => 
     }
 
     // Create shop
-    const shopResult = await db.query(
+    const shopResult = await pool.query(
       'INSERT INTO shops (name, owner_id, address, phone) VALUES ($1, $2, $3, $4) RETURNING *',
       [name, ownerId, address, phone]
     );
 
-    await db.query('COMMIT');
+    await pool.query('COMMIT');
 
     res.status(201).json(shopResult.rows[0]);
   } catch (error) {
-    await db.query('ROLLBACK');
+    await pool.query('ROLLBACK');
     console.error('Error creating shop:', error);
     res.status(500).json({ error: 'Server error' });
   }
@@ -128,7 +128,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const result = await db.query(
+    const result = await pool.query(
       'UPDATE shops SET name = $1, address = $2, phone = $3 WHERE id = $4 RETURNING *',
       [name, address, phone, shopId]
     );
@@ -150,7 +150,7 @@ router.patch('/:id/subscription', authenticateToken, requireRole(['admin']), asy
     const shopId = req.params.id;
     const { status } = req.body;
 
-    const result = await db.query(
+    const result = await pool.query(
       'UPDATE shops SET subscription_status = $1 WHERE id = $2 RETURNING *',
       [status, shopId]
     );
@@ -171,7 +171,7 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req, res
   try {
     const shopId = req.params.id;
 
-    const result = await db.query(
+    const result = await pool.query(
       'DELETE FROM shops WHERE id = $1 RETURNING id',
       [shopId]
     );

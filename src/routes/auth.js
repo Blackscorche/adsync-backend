@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('../config/database');
+const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -15,7 +15,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password required' });
     }
 
-    const result = await db.query(
+    const result = await pool.query(
       'SELECT id, email, password_hash, full_name, role FROM users WHERE email = $1 AND is_active = true',
       [email]
     );
@@ -34,7 +34,7 @@ router.post('/login', async (req, res) => {
     // Get shop info if user is owner
     let shopId = null;
     if (user.role === 'owner') {
-      const shopResult = await db.query(
+      const shopResult = await pool.query(
         'SELECT id FROM shops WHERE owner_id = $1',
         [user.id]
       );
@@ -48,7 +48,7 @@ router.post('/login', async (req, res) => {
         role: user.role,
         shopId: shopId 
       },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || 'your-secret-key-here',
       { expiresIn: '24h' }
     );
 
@@ -72,10 +72,29 @@ router.post('/login', async (req, res) => {
 // Register shop owner
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, fullName, shopName, address, phone } = req.body;
+    const { 
+      email, 
+      password, 
+      firstName, 
+      lastName, 
+      phone,
+      role = 'owner',
+      shopName, 
+      address,
+      city,
+      country,
+      adminKey
+    } = req.body;
+
+    // Validate admin registration
+    if (role === 'admin') {
+      if (adminKey !== 'IVAA-ADMIN-2024') {
+        return res.status(403).json({ error: 'Invalid admin registration key' });
+      }
+    }
 
     // Check if email exists
-    const existingUser = await db.query(
+    const existingUser = await pool.query(
       'SELECT id FROM users WHERE email = $1',
       [email]
     );
@@ -86,30 +105,89 @@ router.post('/register', async (req, res) => {
 
     // Hash password
     const passwordHash = await bcrypt.hash(password, 10);
+    const fullName = `${firstName} ${lastName}`;
 
     // Start transaction
-    await db.query('BEGIN');
+    await pool.query('BEGIN');
 
-    // Create user
-    const userResult = await db.query(
-      'INSERT INTO users (email, password_hash, full_name, role) VALUES ($1, $2, $3, $4) RETURNING id',
-      [email, passwordHash, fullName, 'owner']
-    );
+    try {
+      // Create user
+      const userResult = await pool.query(
+        'INSERT INTO users (email, password_hash, full_name, role, is_active) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        [email, passwordHash, fullName, role, true]
+      );
 
-    const userId = userResult.rows[0].id;
+      const userId = userResult.rows[0].id;
 
-    // Create shop
-    await db.query(
-      'INSERT INTO shops (name, owner_id, address, phone) VALUES ($1, $2, $3, $4)',
-      [shopName, userId, address, phone]
-    );
+      // Create shop for owner role
+      if (role === 'owner' && shopName) {
+        const fullAddress = `${address}, ${city}, ${country}`;
+        const shopResult = await pool.query(
+          'INSERT INTO shops (name, owner_id, address, phone, subscription_status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+          [shopName, userId, fullAddress, phone, 'trial']
+        );
 
-    await db.query('COMMIT');
+        const shopId = shopResult.rows[0].id;
 
-    res.status(201).json({ message: 'Registration successful' });
+        // Generate token with shop info
+        const token = jwt.sign(
+          { 
+            userId: userId, 
+            email: email,
+            role: role,
+            shopId: shopId 
+          },
+          process.env.JWT_SECRET || 'your-secret-key-here',
+          { expiresIn: '24h' }
+        );
+
+        await pool.query('COMMIT');
+
+        return res.status(201).json({ 
+          message: 'Registration successful',
+          token,
+          user: {
+            id: userId,
+            email: email,
+            name: fullName,
+            role: role,
+            shopId: shopId
+          }
+        });
+      }
+
+      // For admin or sales, no shop needed
+      const token = jwt.sign(
+        { 
+          userId: userId, 
+          email: email,
+          role: role,
+          shopId: null 
+        },
+        process.env.JWT_SECRET || 'your-secret-key-here',
+        { expiresIn: '24h' }
+      );
+
+      await pool.query('COMMIT');
+
+      res.status(201).json({ 
+        message: 'Registration successful',
+        token,
+        user: {
+          id: userId,
+          email: email,
+          name: fullName,
+          role: role,
+          shopId: null
+        }
+      });
+
+    } catch (error) {
+      await pool.query('ROLLBACK');
+      throw error;
+    }
 
   } catch (error) {
-    await db.query('ROLLBACK');
     console.error('Registration error:', error);
     res.status(500).json({ error: 'Server error' });
   }
@@ -126,7 +204,7 @@ router.post('/change-password', authenticateToken, async (req, res) => {
     const { currentPassword, newPassword } = req.body;
     const userId = req.user.userId;
 
-    const result = await db.query(
+    const result = await pool.query(
       'SELECT password_hash FROM users WHERE id = $1',
       [userId]
     );
@@ -139,7 +217,7 @@ router.post('/change-password', authenticateToken, async (req, res) => {
 
     const newPasswordHash = await bcrypt.hash(newPassword, 10);
     
-    await db.query(
+    await pool.query(
       'UPDATE users SET password_hash = $1 WHERE id = $2',
       [newPasswordHash, userId]
     );
