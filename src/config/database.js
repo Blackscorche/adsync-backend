@@ -9,9 +9,13 @@ const pool = new Pool({
   connectionTimeoutMillis: 2000,
 });
 
-// Test database connection
+let hasLoggedConnection = false;
+
 pool.on('connect', () => {
-  console.log('✅ Database connected successfully');
+  if (!hasLoggedConnection) {
+    console.log('✅ Database connected successfully');
+    hasLoggedConnection = true;
+  }
 });
 
 pool.on('error', (err) => {
