@@ -25,14 +25,16 @@ app.use('/api', limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Routes (will be added)
+// Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/shops', require('./routes/shops'));
 app.use('/api/screens', require('./routes/screens'));
-app.use('/api/content', require('./routes/content'));
-app.use('/api/playlists', require('./routes/playlists'));
-app.use('/api/billing', require('./routes/billing'));
-app.use('/api/monitoring', require('./routes/monitoring'));
+
+// Routes for Milestone 2 (to be implemented)
+// app.use('/api/content', require('./routes/content'));
+// app.use('/api/playlists', require('./routes/playlists'));
+// app.use('/api/billing', require('./routes/billing'));
+// app.use('/api/monitoring', require('./routes/monitoring'));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
