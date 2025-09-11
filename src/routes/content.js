@@ -173,9 +173,9 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
       fileType = 'pdf';
     }
 
-    // Create file URL with /api prefix
-    const fileUrl = `/api/uploads/content/${req.file.filename}`;
-    const thumbnailUrl = `/api/uploads/thumbnails/${req.file.filename}`; // TODO: Generate actual thumbnail
+    // Create file URL (without /api prefix, like shop photos)
+    const fileUrl = `/uploads/content/${req.file.filename}`;
+    const thumbnailUrl = `/uploads/thumbnails/${req.file.filename}`; // TODO: Generate actual thumbnail
 
     // Insert content record
     const result = await pool.query(

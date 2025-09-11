@@ -26,8 +26,10 @@ app.use('/api', limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Static file serving for uploaded content (under /api prefix for consistency)
-app.use('/api/uploads', express.static(path.join(__dirname, '../uploads')));
+// Static file serving for uploaded content
+app.use('/uploads/content', express.static(path.join(__dirname, '../uploads/content')));
+app.use('/uploads/thumbnails', express.static(path.join(__dirname, '../uploads/thumbnails')));
+app.use('/uploads/shops', express.static(path.join(__dirname, '../uploads/shops')));
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));

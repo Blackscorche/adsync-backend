@@ -1,10 +1,44 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Configure multer for shop photo uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../../uploads/shops');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'shop-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
 
 // Login
 router.post('/login', async (req, res) => {
@@ -69,8 +103,8 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Register shop owner
-router.post('/register', async (req, res) => {
+// Register shop owner (with optional photo)
+router.post('/register', upload.single('shopPhoto'), async (req, res) => {
   try {
     const { 
       email, 
@@ -125,10 +159,29 @@ router.post('/register', async (req, res) => {
 
       // Create shop for owner role
       if (role === 'owner' && shopName) {
-        const fullAddress = `${address}, ${city}, ${country}`;
+        const fullAddress = `${address}, ${city}`;
+        
+        // Get photo URL if uploaded
+        const photoUrl = req.file ? `/uploads/shops/${req.file.filename}` : null;
+        
         const shopResult = await pool.query(
-          'INSERT INTO shops (name, owner_id, address, phone, subscription_status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-          [shopName, userId, fullAddress, phone, 'trial']
+          'INSERT INTO shops (name, owner_id, address, phone, subscription_status, shop_type, postcode, city, county, photo_url, photo_uploaded_at, terms_accepted, terms_accepted_date, terms_accepted_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id',
+          [
+            shopName, 
+            userId, 
+            fullAddress, 
+            phone, 
+            'trial',
+            shopType || 'retail',
+            postcode,
+            city,
+            county,
+            photoUrl,
+            photoUrl ? new Date() : null,
+            termsAccepted || false,
+            termsAcceptedDate || null,
+            termsAccepted ? userId : null
+          ]
         );
 
         const shopId = shopResult.rows[0].id;
