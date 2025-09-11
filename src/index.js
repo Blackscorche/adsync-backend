@@ -35,8 +35,8 @@ app.use('/api/shops', require('./routes/shops'));
 app.use('/api/screens', require('./routes/screens'));
 app.use('/api/content', require('./routes/content'));
 
-// Routes for Milestone 2 (to be implemented)
-// app.use('/api/playlists', require('./routes/playlists'));
+// Routes for Milestone 2
+app.use('/api/playlists', require('./routes/playlists'));
 // app.use('/api/billing', require('./routes/billing'));
 // app.use('/api/monitoring', require('./routes/monitoring'));
 

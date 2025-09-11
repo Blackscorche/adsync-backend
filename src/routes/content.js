@@ -239,17 +239,17 @@ router.patch('/:id/review', authenticateToken, requireRole(['admin']), async (re
       return res.status(404).json({ error: 'Content not found' });
     }
 
-    // If approved, notify the shop owner (TODO: Implement notification system)
-    if (status === 'approved') {
-      // Create notification
-      await pool.query(
-        `INSERT INTO notifications (user_id, type, title, message)
-         SELECT owner_id, 'content_approved', 'Content Approved', 
-                'Your uploaded content has been approved and is now live.'
-         FROM shops WHERE id = $1`,
-        [result.rows[0].shop_id]
-      );
-    }
+    // TODO: Implement notification system
+    // if (status === 'approved') {
+    //   // Create notification when notifications table is ready
+    //   await pool.query(
+    //     `INSERT INTO notifications (user_id, type, title, message)
+    //      SELECT owner_id, 'content_approved', 'Content Approved', 
+    //             'Your uploaded content has been approved and is now live.'
+    //      FROM shops WHERE id = $1`,
+    //     [result.rows[0].shop_id]
+    //   );
+    // }
 
     res.json({
       message: `Content ${status} successfully`,
