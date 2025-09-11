@@ -4,26 +4,51 @@ const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Get all shops (Admin only)
-router.get('/', authenticateToken, requireRole(['admin']), async (req, res) => {
+// Get all shops (Admin and Design team)
+router.get('/', authenticateToken, requireRole(['admin', 'design']), async (req, res) => {
   try {
-    const result = await pool.query(`
+    const { shop_type, city } = req.query;
+    
+    let query = `
       SELECT 
         s.id, 
         s.name, 
-        s.address, 
+        s.address,
+        s.postcode,
+        s.shop_type,
         s.phone,
         s.subscription_status,
         s.created_at,
+        s.terms_accepted,
+        s.terms_accepted_date,
         u.full_name as owner_name,
         u.email as owner_email,
         COUNT(DISTINCT sc.id) as screen_count
       FROM shops s
       LEFT JOIN users u ON s.owner_id = u.id
       LEFT JOIN screens sc ON sc.shop_id = s.id
-      GROUP BY s.id, u.full_name, u.email
-      ORDER BY s.created_at DESC
-    `);
+    `;
+    
+    const conditions = [];
+    const params = [];
+    
+    if (shop_type) {
+      params.push(shop_type);
+      conditions.push(`s.shop_type = $${params.length}`);
+    }
+    
+    if (city) {
+      params.push(`%${city}%`);
+      conditions.push(`s.address ILIKE $${params.length}`);
+    }
+    
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    
+    query += ' GROUP BY s.id, u.full_name, u.email ORDER BY s.created_at DESC';
+    
+    const result = await pool.query(query, params);
 
     res.json(result.rows);
   } catch (error) {
@@ -75,7 +100,20 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create new shop (Admin only)
 router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
-    const { name, ownerEmail, ownerName, ownerPassword, address, phone } = req.body;
+    const { 
+      name, 
+      ownerEmail, 
+      ownerName, 
+      ownerPassword, 
+      address, 
+      postcode,
+      shop_type = 'retail',
+      phone,
+      contract_start_date,
+      contract_end_date,
+      terms_accepted,
+      terms_accepted_date
+    } = req.body;
 
     await pool.query('BEGIN');
 
@@ -101,10 +139,34 @@ router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => 
       ownerId = userResult.rows[0].id;
     }
 
-    // Create shop
+    // Create shop with new fields
     const shopResult = await pool.query(
-      'INSERT INTO shops (name, owner_id, address, phone) VALUES ($1, $2, $3, $4) RETURNING *',
-      [name, ownerId, address, phone]
+      `INSERT INTO shops (
+        name, 
+        owner_id, 
+        address, 
+        postcode,
+        shop_type,
+        phone,
+        terms_accepted,
+        terms_accepted_date,
+        terms_accepted_by,
+        contract_start_date,
+        contract_end_date
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [
+        name, 
+        ownerId, 
+        address, 
+        postcode,
+        shop_type,
+        phone,
+        terms_accepted || false,
+        terms_accepted_date || null,
+        terms_accepted ? req.user.userId : null,
+        contract_start_date || null,
+        contract_end_date || null
+      ]
     );
 
     await pool.query('COMMIT');
@@ -121,16 +183,68 @@ router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => 
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const shopId = req.params.id;
-    const { name, address, phone } = req.body;
+    const { 
+      name, 
+      address, 
+      postcode,
+      shop_type,
+      phone,
+      contract_start_date,
+      contract_end_date
+    } = req.body;
 
     // Check access
     if (req.user.role === 'owner' && req.user.shopId !== parseInt(shopId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
+    // Build update query dynamically
+    const updates = [];
+    const values = [];
+    let paramCount = 0;
+    
+    if (name !== undefined) {
+      paramCount++;
+      updates.push(`name = $${paramCount}`);
+      values.push(name);
+    }
+    if (address !== undefined) {
+      paramCount++;
+      updates.push(`address = $${paramCount}`);
+      values.push(address);
+    }
+    if (postcode !== undefined) {
+      paramCount++;
+      updates.push(`postcode = $${paramCount}`);
+      values.push(postcode);
+    }
+    if (shop_type !== undefined) {
+      paramCount++;
+      updates.push(`shop_type = $${paramCount}`);
+      values.push(shop_type);
+    }
+    if (phone !== undefined) {
+      paramCount++;
+      updates.push(`phone = $${paramCount}`);
+      values.push(phone);
+    }
+    if (contract_start_date !== undefined) {
+      paramCount++;
+      updates.push(`contract_start_date = $${paramCount}`);
+      values.push(contract_start_date);
+    }
+    if (contract_end_date !== undefined) {
+      paramCount++;
+      updates.push(`contract_end_date = $${paramCount}`);
+      values.push(contract_end_date);
+    }
+    
+    paramCount++;
+    values.push(shopId);
+    
     const result = await pool.query(
-      'UPDATE shops SET name = $1, address = $2, phone = $3 WHERE id = $4 RETURNING *',
-      [name, address, phone, shopId]
+      `UPDATE shops SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+      values
     );
 
     if (result.rows.length === 0) {

@@ -82,7 +82,11 @@ router.post('/register', async (req, res) => {
       shopName, 
       address,
       city,
-      country,
+      postcode,
+      shopType,
+      county,
+      termsAccepted,
+      termsAcceptedDate,
       adminKey
     } = req.body;
 
@@ -156,7 +160,7 @@ router.post('/register', async (req, res) => {
         });
       }
 
-      // For admin or sales, no shop needed
+      // For admin or design, no shop needed
       const token = jwt.sign(
         { 
           userId: userId, 

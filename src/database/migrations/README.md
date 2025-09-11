@@ -34,6 +34,8 @@ npm run migrate  # Only runs new migrations
 
 ## Migration History
 - `001_add_playlist_description.sql` - Adds description column to playlists table
+- `002_add_shop_enhancements.sql` - Adds shop type, postcode, contract dates, and terms acceptance tracking
+- `003_expand_shop_types.sql` - Expands shop type options for better categorization (supermarket, phone shop, etc.)
 
 ## Best Practices
 1. Always test migrations on a development database first

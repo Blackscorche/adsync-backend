@@ -37,8 +37,7 @@ async function migrate() {
       console.log('  - screen_playlists');
       console.log('  - subscriptions');
       console.log('  - invoices');
-      console.log('  - extra_uploads');
-      console.log('  - sales_commissions\n');
+      console.log('  - extra_uploads\n');
     } else {
       console.log('📊 Existing database detected.');
       console.log(`   Found ${tableCount} tables.\n`);

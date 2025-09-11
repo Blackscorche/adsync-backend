@@ -34,6 +34,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/shops', require('./routes/shops'));
 app.use('/api/screens', require('./routes/screens'));
 app.use('/api/content', require('./routes/content'));
+app.use('/api/postcode', require('./routes/postcode'));
 
 // Routes for Milestone 2
 app.use('/api/playlists', require('./routes/playlists'));

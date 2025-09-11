@@ -50,13 +50,13 @@ const upload = multer({
   }
 });
 
-// Get all content for a shop (owner) or all content (admin)
+// Get all content for a shop (owner) or all content (admin/design)
 router.get('/', authenticateToken, async (req, res) => {
   try {
     let query;
     let params = [];
 
-    if (req.user.role === 'admin') {
+    if (req.user.role === 'admin' || req.user.role === 'design') {
       query = `
         SELECT 
           c.*,
@@ -211,7 +211,7 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
 });
 
 // Approve or reject content (admin only)
-router.patch('/:id/review', authenticateToken, requireRole(['admin']), async (req, res) => {
+router.patch('/:id/review', authenticateToken, requireRole(['admin', 'design']), async (req, res) => {
   try {
     const { id } = req.params;
     const { status, rejection_reason } = req.body;

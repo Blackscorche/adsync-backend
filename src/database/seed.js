@@ -8,7 +8,7 @@ async function seedDatabase() {
     // Hash passwords
     const adminPassword = await bcrypt.hash('admin123', 10);
     const ownerPassword = await bcrypt.hash('owner123', 10);
-    const salesPassword = await bcrypt.hash('sales123', 10);
+    const designPassword = await bcrypt.hash('design123', 10);
 
     // Create admin user
     const adminResult = await pool.query(
@@ -36,14 +36,14 @@ async function seedDatabase() {
     );
     console.log('✅ Owner user created:', owner2Result.rows[0].email);
 
-    // Create sales user
-    const salesResult = await pool.query(
+    // Create design team user
+    const designResult = await pool.query(
       `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW())
        RETURNING id, email, role`,
-      ['sales@ivaamedia.com', salesPassword, 'Sales Rep', 'sales', true]
+      ['design@ivaamedia.com', designPassword, 'Design Team Lead', 'design', true]
     );
-    console.log('✅ Sales user created:', salesResult.rows[0].email);
+    console.log('✅ Design team user created:', designResult.rows[0].email);
 
     // Create shops for owners
     const shop1Result = await pool.query(
@@ -90,7 +90,7 @@ async function seedDatabase() {
     console.log('Admin: admin@ivaamedia.com / admin123');
     console.log('Owner 1: owner1@example.com / owner123');
     console.log('Owner 2: owner2@example.com / owner123');
-    console.log('Sales: sales@ivaamedia.com / sales123');
+    console.log('Design Team: design@ivaamedia.com / design123');
     console.log('------------------------');
     console.log('Admin Registration Key: IVAA-ADMIN-2024');
     console.log('------------------------\n');
