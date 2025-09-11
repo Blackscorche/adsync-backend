@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -25,13 +26,16 @@ app.use('/api', limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Static file serving for uploaded content (under /api prefix for consistency)
+app.use('/api/uploads', express.static(path.join(__dirname, '../uploads')));
+
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/shops', require('./routes/shops'));
 app.use('/api/screens', require('./routes/screens'));
+app.use('/api/content', require('./routes/content'));
 
 // Routes for Milestone 2 (to be implemented)
-// app.use('/api/content', require('./routes/content'));
 // app.use('/api/playlists', require('./routes/playlists'));
 // app.use('/api/billing', require('./routes/billing'));
 // app.use('/api/monitoring', require('./routes/monitoring'));
