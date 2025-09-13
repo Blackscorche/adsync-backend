@@ -30,6 +30,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads/content', express.static(path.join(__dirname, '../uploads/content')));
 app.use('/uploads/thumbnails', express.static(path.join(__dirname, '../uploads/thumbnails')));
 app.use('/uploads/shops', express.static(path.join(__dirname, '../uploads/shops')));
+app.use('/uploads/tickets', express.static(path.join(__dirname, '../uploads/tickets')));
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -41,12 +42,12 @@ app.use('/api/postcode', require('./routes/postcode'));
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/design', require('./routes/design'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/support', require('./routes/support'));
 
 // Routes for Milestone 2
 app.use('/api/playlists', require('./routes/playlists'));
 app.use('/api/billing', require('./routes/billing'));
 app.use('/api/payment', require('./routes/payment'));
-// app.use('/api/monitoring', require('./routes/monitoring'));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
