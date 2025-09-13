@@ -33,10 +33,13 @@ app.use('/uploads/shops', express.static(path.join(__dirname, '../uploads/shops'
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/admin', require('./routes/admin'));
 app.use('/api/shops', require('./routes/shops'));
 app.use('/api/screens', require('./routes/screens'));
 app.use('/api/content', require('./routes/content'));
 app.use('/api/postcode', require('./routes/postcode'));
+app.use('/api/sales', require('./routes/sales'));
+app.use('/api/notifications', require('./routes/notifications'));
 
 // Routes for Milestone 2
 app.use('/api/playlists', require('./routes/playlists'));
