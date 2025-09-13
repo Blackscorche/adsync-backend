@@ -130,23 +130,21 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Create new playlist
-router.post('/', authenticateToken, requireRole(['owner', 'admin']), async (req, res) => {
+// Create new playlist - ONLY designers can create playlists
+router.post('/', authenticateToken, requireRole(['design', 'admin']), async (req, res) => {
   try {
-    const { name, description } = req.body;
-    let shopId;
+    const { name, description, shopId } = req.body;
 
-    if (req.user.role === 'owner') {
-      // Get shop_id for the owner
-      const shopResult = await pool.query(
-        'SELECT id FROM shops WHERE owner_id = $1',
-        [req.user.userId]
+    if (req.user.role === 'design') {
+      // Verify designer is assigned to this shop
+      const assignmentCheck = await pool.query(
+        'SELECT id FROM shops WHERE id = $1 AND assigned_designer_id = $2',
+        [shopId, req.user.userId]
       );
-      
-      if (shopResult.rows.length === 0) {
-        return res.status(404).json({ error: 'Shop not found for this owner' });
+
+      if (assignmentCheck.rows.length === 0) {
+        return res.status(403).json({ error: 'You are not assigned to this shop' });
       }
-      shopId = shopResult.rows[0].id;
     } else {
       // Admin must specify shop_id
       shopId = req.body.shop_id;
@@ -170,7 +168,7 @@ router.post('/', authenticateToken, requireRole(['owner', 'admin']), async (req,
 });
 
 // Update playlist
-router.put('/:id', authenticateToken, requireRole(['owner', 'admin']), async (req, res) => {
+router.put('/:id', authenticateToken, requireRole(['design', 'admin']), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, description, is_active } = req.body;
@@ -266,7 +264,7 @@ router.post('/:id/items', authenticateToken, requireRole(['owner', 'admin']), as
 });
 
 // Update playlist item order
-router.put('/:id/items/reorder', authenticateToken, requireRole(['owner', 'admin']), async (req, res) => {
+router.put('/:id/items/reorder', authenticateToken, requireRole(['design', 'admin']), async (req, res) => {
   try {
     const { id } = req.params;
     const { items } = req.body; // Array of { id, position }
@@ -306,7 +304,7 @@ router.put('/:id/items/reorder', authenticateToken, requireRole(['owner', 'admin
 });
 
 // Remove item from playlist
-router.delete('/:playlistId/items/:itemId', authenticateToken, requireRole(['owner', 'admin']), async (req, res) => {
+router.delete('/:playlistId/items/:itemId', authenticateToken, requireRole(['design', 'admin']), async (req, res) => {
   try {
     const { playlistId, itemId } = req.params;
 
@@ -351,7 +349,7 @@ router.delete('/:playlistId/items/:itemId', authenticateToken, requireRole(['own
 });
 
 // Delete playlist
-router.delete('/:id', authenticateToken, requireRole(['owner', 'admin']), async (req, res) => {
+router.delete('/:id', authenticateToken, requireRole(['design', 'admin']), async (req, res) => {
   try {
     const { id } = req.params;
 
