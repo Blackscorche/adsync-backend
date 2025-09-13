@@ -5,94 +5,35 @@ async function seedDatabase() {
   try {
     console.log('🌱 Starting database seed...');
 
-    // Hash passwords
-    const adminPassword = await bcrypt.hash('admin123', 10);
-    const ownerPassword = await bcrypt.hash('owner123', 10);
-    const designPassword = await bcrypt.hash('design123', 10);
+    // Create initial users with proper passwords
+    const users = [
+      { email: 'admin@ivaa.com', password: 'admin123', name: 'System Admin', role: 'admin' },
+      { email: 'sales@ivaa.com', password: 'sales123', name: 'Sales Team', role: 'sales' },
+      { email: 'design@ivaa.com', password: 'design123', name: 'Design Team', role: 'design' },
+    ];
 
-    // Create admin user
-    const adminResult = await pool.query(
-      `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       RETURNING id, email, role`,
-      ['admin@ivaamedia.com', adminPassword, 'Admin User', 'admin', true]
-    );
-    console.log('✅ Admin user created:', adminResult.rows[0].email);
+    console.log('\n👤 Creating users...');
+    for (const user of users) {
+      const hashedPassword = await bcrypt.hash(user.password, 10);
 
-    // Create owner users
-    const owner1Result = await pool.query(
-      `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       RETURNING id, email, role`,
-      ['owner1@example.com', ownerPassword, 'John Doe', 'owner', true]
-    );
-    console.log('✅ Owner user created:', owner1Result.rows[0].email);
+      const result = await pool.query(
+        `INSERT INTO users (email, password_hash, full_name, role, is_active)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (email)
+         DO UPDATE SET password_hash = $2, full_name = $3, role = $4
+         RETURNING id, email, role`,
+        [user.email, hashedPassword, user.name, user.role, true]
+      );
 
-    const owner2Result = await pool.query(
-      `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       RETURNING id, email, role`,
-      ['owner2@example.com', ownerPassword, 'Jane Smith', 'owner', true]
-    );
-    console.log('✅ Owner user created:', owner2Result.rows[0].email);
-
-    // Create design team user
-    const designResult = await pool.query(
-      `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       RETURNING id, email, role`,
-      ['design@ivaamedia.com', designPassword, 'Design Team Lead', 'design', true]
-    );
-    console.log('✅ Design team user created:', designResult.rows[0].email);
-
-    // Create shops for owners
-    const shop1Result = await pool.query(
-      `INSERT INTO shops (owner_id, name, address, phone, subscription_status, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       RETURNING id, name`,
-      [owner1Result.rows[0].id, 'Coffee Paradise', '123 Main Street, Phnom Penh, KH', '+855123456790', 'trial']
-    );
-    console.log('✅ Shop created:', shop1Result.rows[0].name);
-
-    const shop2Result = await pool.query(
-      `INSERT INTO shops (owner_id, name, address, phone, subscription_status, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       RETURNING id, name`,
-      [owner2Result.rows[0].id, 'Fashion Boutique', '456 River Road, Siem Reap, KH', '+855123456791', 'active']
-    );
-    console.log('✅ Shop created:', shop2Result.rows[0].name);
-
-    // Create screens for shops
-    await pool.query(
-      `INSERT INTO screens (shop_id, name, device_id, location, status, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())`,
-      [shop1Result.rows[0].id, 'Window Display', 'DEVICE001', 'Window', 'offline']
-    );
-    console.log('✅ Screen created for Coffee Paradise');
-
-    await pool.query(
-      `INSERT INTO screens (shop_id, name, device_id, location, status, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())`,
-      [shop1Result.rows[0].id, 'Counter Display', 'DEVICE002', 'Till', 'offline']
-    );
-    console.log('✅ Screen created for Coffee Paradise');
-
-    await pool.query(
-      `INSERT INTO screens (shop_id, name, device_id, location, status, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())`,
-      [shop2Result.rows[0].id, 'Entrance Display', 'DEVICE003', 'Window', 'offline']
-    );
-    console.log('✅ Screen created for Fashion Boutique');
+      console.log(`✅ Created ${user.role}: ${user.email}`);
+    }
 
     console.log('\n🎉 Database seeded successfully!');
     console.log('\n📝 Test Credentials:');
     console.log('------------------------');
-    console.log('Admin: admin@ivaamedia.com / admin123');
-    console.log('Owner 1: owner1@example.com / owner123');
-    console.log('Owner 2: owner2@example.com / owner123');
-    console.log('Design Team: design@ivaamedia.com / design123');
-    console.log('------------------------');
-    console.log('Admin Registration Key: IVAA-ADMIN-2024');
+    users.forEach(user => {
+      console.log(`${user.role}: ${user.email} / ${user.password}`);
+    });
     console.log('------------------------\n');
 
   } catch (error) {

@@ -1,146 +1,104 @@
 const fs = require('fs');
 const path = require('path');
 const pool = require('../config/database');
+const bcrypt = require('bcryptjs');
 
-async function migrate() {
+async function runMigration() {
+  console.log('🚀 Starting Ivaa AdSync v2.0 Migration...\n');
+
   try {
-    console.log('🚀 Starting database migration...\n');
+    // Step 1: Check connection
+    console.log('📡 Checking database connection...');
+    await pool.query('SELECT NOW()');
+    console.log('✅ Database connected\n');
 
-    // Check if database is empty (fresh install)
-    const tableCheck = await pool.query(`
-      SELECT COUNT(*) as count 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-      AND table_type = 'BASE TABLE'
+    // Step 2: Backup warning
+    console.log('⚠️  WARNING: This migration will DELETE ALL EXISTING DATA!');
+    console.log('⚠️  Make sure you have backed up your database first!');
+    console.log('⚠️  Run: pg_dump -U postgres -d ivaa_adsync > backup.sql\n');
+
+    // Wait for user confirmation
+    if (process.argv[2] !== '--force') {
+      console.log('To proceed, run: npm run migrate -- --force');
+      process.exit(0);
+    }
+
+    // Step 3: Run migration
+    console.log('🔄 Running migration...');
+    const migrationSQL = fs.readFileSync(
+      path.join(__dirname, 'schema.sql'),
+      'utf8'
+    );
+
+    // Execute migration
+    await pool.query(migrationSQL);
+    console.log('✅ Database schema created\n');
+
+    // Step 4: Create initial users with proper passwords
+    console.log('👤 Creating initial users...');
+
+    const users = [
+      { email: 'admin@ivaa.com', password: 'admin123', name: 'System Admin', role: 'admin' },
+      { email: 'sales@ivaa.com', password: 'sales123', name: 'Sales Team', role: 'sales' },
+      { email: 'design@ivaa.com', password: 'design123', name: 'Design Team', role: 'design' },
+    ];
+
+    for (const user of users) {
+      const hashedPassword = await bcrypt.hash(user.password, 10);
+      await pool.query(
+        `INSERT INTO users (email, password_hash, full_name, role)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (email)
+         DO UPDATE SET password_hash = $2, full_name = $3, role = $4`,
+        [user.email, hashedPassword, user.name, user.role]
+      );
+      console.log(`✅ Created ${user.role}: ${user.email} / ${user.password}`);
+    }
+
+    // Step 5: Verify migration
+    console.log('\n📊 Migration Summary:');
+
+    const tableCount = await pool.query(`
+      SELECT COUNT(*) as count
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
     `);
-    
-    const tableCount = parseInt(tableCheck.rows[0].count);
-    const isEmptyDatabase = tableCount === 0;
+    console.log(`✅ Tables created: ${tableCount.rows[0].count}`);
 
-    if (isEmptyDatabase) {
-      console.log('📝 Empty database detected. Running initial schema...\n');
-      
-      // Read and execute the schema file
-      const schemaPath = path.join(__dirname, 'schema.sql');
-      const schema = fs.readFileSync(schemaPath, 'utf8');
-      
-      await pool.query(schema);
-      
-      console.log('✅ Base tables created successfully!');
-      console.log('📝 Tables created:');
-      console.log('  - users');
-      console.log('  - shops');
-      console.log('  - screens');
-      console.log('  - content');
-      console.log('  - playlists');
-      console.log('  - playlist_items');
-      console.log('  - screen_playlists');
-      console.log('  - subscriptions');
-      console.log('  - invoices');
-      console.log('  - extra_uploads\n');
-    } else {
-      console.log('📊 Existing database detected.');
-      console.log(`   Found ${tableCount} tables.\n`);
-    }
+    const userCount = await pool.query('SELECT COUNT(*) as count FROM users');
+    console.log(`✅ Users created: ${userCount.rows[0].count}`);
 
-    // Now run any pending migrations
-    console.log('🔄 Checking for migrations...\n');
-    
-    // Create migrations tracking table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS migrations (
-        id SERIAL PRIMARY KEY,
-        filename VARCHAR(255) UNIQUE NOT NULL,
-        executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+    const settingsCount = await pool.query('SELECT COUNT(*) as count FROM system_settings');
+    console.log(`✅ System settings: ${settingsCount.rows[0].count}`);
 
-    // Get list of migration files
-    const migrationsDir = path.join(__dirname, 'migrations');
-    
-    // Create migrations directory if it doesn't exist
-    if (!fs.existsSync(migrationsDir)) {
-      fs.mkdirSync(migrationsDir, { recursive: true });
-      console.log('📁 Created migrations directory\n');
-    }
+    const screenSizes = await pool.query('SELECT * FROM screen_sizes ORDER BY size_inches');
+    console.log(`✅ Screen sizes configured:`);
+    screenSizes.rows.forEach(size => {
+      console.log(`   - ${size.size_inches}" screen: £${size.monthly_fee}/month`);
+    });
 
-    const files = fs.readdirSync(migrationsDir)
-      .filter(file => file.endsWith('.sql'))
-      .sort();
+    console.log('\n🎉 Migration completed successfully!');
+    console.log('\n📝 Next steps:');
+    console.log('1. Update backend routes for new roles');
+    console.log('2. Create sales dashboard frontend');
+    console.log('3. Update content workflow');
+    console.log('4. Test all user roles');
 
-    if (files.length === 0) {
-      console.log('No migration files found.\n');
-    } else {
-      // Check which migrations have already been run
-      const executedResult = await pool.query('SELECT filename FROM migrations');
-      const executed = new Set(executedResult.rows.map(row => row.filename));
-
-      // Run pending migrations
-      let migrationCount = 0;
-      for (const file of files) {
-        if (!executed.has(file)) {
-          console.log(`📝 Running migration: ${file}`);
-          
-          const filePath = path.join(migrationsDir, file);
-          const sql = fs.readFileSync(filePath, 'utf8');
-          
-          try {
-            await pool.query('BEGIN');
-            await pool.query(sql);
-            await pool.query(
-              'INSERT INTO migrations (filename) VALUES ($1)',
-              [file]
-            );
-            await pool.query('COMMIT');
-            console.log(`   ✅ Migration completed: ${file}\n`);
-            migrationCount++;
-          } catch (error) {
-            await pool.query('ROLLBACK');
-            console.error(`   ❌ Migration failed: ${file}`);
-            console.error(`   Error: ${error.message}\n`);
-            throw error;
-          }
-        }
-      }
-
-      if (migrationCount === 0) {
-        console.log('✅ All migrations are up to date.\n');
-      } else {
-        console.log(`✅ Successfully ran ${migrationCount} migration(s).\n`);
-      }
-    }
-
-    console.log('🎉 Database migration completed successfully!');
-    console.log('\n💡 Next steps:');
-    if (isEmptyDatabase) {
-      console.log('   - Run "npm run seed" to add test data');
-    }
-    console.log('   - Run "npm run dev" to start the server\n');
+    console.log('\n🔑 Test Credentials:');
+    console.log('------------------------');
+    users.forEach(user => {
+      console.log(`${user.role}: ${user.email} / ${user.password}`);
+    });
+    console.log('------------------------\n');
 
   } catch (error) {
     console.error('❌ Migration failed:', error.message);
-    
-    if (error.code === 'ECONNREFUSED') {
-      console.error('\n🔧 Make sure PostgreSQL is running and the database exists.');
-      console.error('   You may need to create the database first:');
-      console.error('   psql -U postgres -c "CREATE DATABASE ivaa_adsync;"');
-    } else if (error.code === '42P07') {
-      console.error('\n⚠️  Some tables already exist.');
-      console.error('   This might happen if the database is partially set up.');
-      console.error('   Options:');
-      console.error('   1. Drop all tables and run migration again');
-      console.error('   2. Manually fix the database state');
-    }
-    
+    console.error('\nFull error:', error);
     process.exit(1);
   } finally {
     await pool.end();
   }
 }
 
-// Run migration if called directly
-if (require.main === module) {
-  migrate();
-}
-
-module.exports = migrate;
+// Run migration
+runMigration();
