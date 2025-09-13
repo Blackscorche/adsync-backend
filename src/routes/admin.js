@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const emailService = require('../services/email');
 
 const router = express.Router();
 
@@ -116,6 +117,9 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
            JSON.stringify({ shop_id: shopId, shop_name: shop.name })]
         );
 
+        // Send approval email
+        await emailService.sendShopApprovalEmail(shopId);
+
       } else {
         // Delete owner account if rejected
         await pool.query('DELETE FROM users WHERE id = $1', [shop.owner_id]);
@@ -129,6 +133,9 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
            `${shop.name} has been rejected: ${rejection_reason}`,
            JSON.stringify({ shop_id: shopId, shop_name: shop.name, reason: rejection_reason })]
         );
+
+        // Send rejection email
+        await emailService.sendShopRejectionEmail(shopId, rejection_reason);
       }
 
       await pool.query('COMMIT');

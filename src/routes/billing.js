@@ -4,6 +4,7 @@ const { authenticateToken, requireRole } = require('../middleware/auth');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
+const emailService = require('../services/email');
 
 const router = express.Router();
 
@@ -183,6 +184,9 @@ router.post('/shops/:shopId/generate-invoice', authenticateToken, requireRole(['
       ]
     );
 
+    // Send invoice email
+    await emailService.sendInvoiceEmail(billResult.rows[0].id);
+
     res.json({
       message: 'Invoice generated successfully',
       bill: billResult.rows[0]
@@ -334,6 +338,11 @@ router.patch('/bills/:billId/payment', authenticateToken, requireRole(['admin'])
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Bill not found' });
+    }
+
+    // Send payment confirmation email if marked as paid
+    if (status === 'paid') {
+      await emailService.sendPaymentConfirmation(billId);
     }
 
     res.json({
