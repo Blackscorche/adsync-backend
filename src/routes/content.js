@@ -210,8 +210,77 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
   }
 });
 
-// Approve or reject content (admin only)
-router.patch('/:id/review', authenticateToken, requireRole(['admin', 'design']), async (req, res) => {
+// Designer picks up content for editing
+router.patch('/:id/start-design', authenticateToken, requireRole(['design']), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `UPDATE content
+       SET status = 'in_design',
+           designed_by = $1,
+           designed_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND status = 'pending'
+       RETURNING *`,
+      [req.user.userId, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Content not found or already in design' });
+    }
+
+    res.json({
+      message: 'Content marked as in design',
+      content: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error starting design:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Designer uploads edited version
+router.post('/:id/upload-design', authenticateToken, requireRole(['design']), upload.single('file'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const fileUrl = `/uploads/content/${req.file.filename}`;
+
+    const result = await pool.query(
+      `UPDATE content
+       SET status = 'designed',
+           designed_file_url = $1,
+           designed_by = $2,
+           designed_at = CURRENT_TIMESTAMP
+       WHERE id = $3 AND status = 'in_design'
+       RETURNING *`,
+      [fileUrl, req.user.userId, id]
+    );
+
+    if (result.rows.length === 0) {
+      fs.unlinkSync(req.file.path);
+      return res.status(404).json({ error: 'Content not found or not in design phase' });
+    }
+
+    res.json({
+      message: 'Designed content uploaded for admin review',
+      content: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error uploading design:', error);
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Admin reviews designed content
+router.patch('/:id/review', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
     const { status, rejection_reason } = req.body;
@@ -225,18 +294,18 @@ router.patch('/:id/review', authenticateToken, requireRole(['admin', 'design']),
     }
 
     const result = await pool.query(
-      `UPDATE content 
-       SET status = $1, 
+      `UPDATE content
+       SET status = $1,
            rejection_reason = $2,
            reviewed_by = $3,
            reviewed_at = CURRENT_TIMESTAMP
-       WHERE id = $4
+       WHERE id = $4 AND status = 'designed'
        RETURNING *`,
       [status, rejection_reason || null, req.user.userId, id]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Content not found' });
+      return res.status(404).json({ error: 'Content not found or not ready for review' });
     }
 
     // TODO: Implement notification system
@@ -257,6 +326,35 @@ router.patch('/:id/review', authenticateToken, requireRole(['admin', 'design']),
     });
   } catch (error) {
     console.error('Error reviewing content:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Designer publishes approved content
+router.patch('/:id/publish', authenticateToken, requireRole(['design']), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `UPDATE content
+       SET status = 'published',
+           published_by = $1,
+           published_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND status = 'approved'
+       RETURNING *`,
+      [req.user.userId, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Content not found or not approved for publishing' });
+    }
+
+    res.json({
+      message: 'Content published successfully',
+      content: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error publishing content:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
