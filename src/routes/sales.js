@@ -158,17 +158,24 @@ router.post('/register-shop',
         const shopResult = await pool.query(
           `INSERT INTO shops (
             name, owner_id, registered_by, address, city, postcode,
-            phone, shop_type, approval_status
+            phone, shop_type, approval_status, photo_url, subscription_status,
+            commission_rate, created_at
           )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, 'trial', 10.00, CURRENT_TIMESTAMP)
            RETURNING id`,
           [
             shopName, ownerId, req.user.userId, address, city,
-            postcode, shopPhone, shopType || 'retail'
+            postcode, shopPhone, shopType || 'retail', photoUrl
           ]
         );
 
         const shopId = shopResult.rows[0].id;
+
+        // Update user with shop_id reference
+        await pool.query(
+          'UPDATE users SET shop_id = $1 WHERE id = $2',
+          [shopId, ownerId]
+        );
 
         // Create notification for admin
         await pool.query(
@@ -235,7 +242,10 @@ router.get('/commissions', authenticateToken, requireRole(['sales']), async (req
     const result = await pool.query(
       `SELECT
         sc.*,
-        s.name as shop_name
+        s.name as shop_name,
+        s.approval_status,
+        s.created_at as shop_registered_at,
+        s.approved_at
        FROM sales_commissions sc
        LEFT JOIN shops s ON sc.shop_id = s.id
        WHERE sc.sales_user_id = $1
@@ -250,13 +260,48 @@ router.get('/commissions', authenticateToken, requireRole(['sales']), async (req
         SUM(amount) as total
        FROM sales_commissions
        WHERE sales_user_id = $1
-       GROUP BY status`,
+       GROUP BY status
+       UNION ALL
+       SELECT
+        'total' as status,
+        COUNT(*) as count,
+        SUM(amount) as total
+       FROM sales_commissions
+       WHERE sales_user_id = $1`,
       [req.user.userId]
     );
 
+    // Calculate commission stats
+    const stats = {
+      pending: { count: 0, total: 0 },
+      approved: { count: 0, total: 0 },
+      paid: { count: 0, total: 0 },
+      total: { count: 0, total: 0 }
+    };
+
+    summary.rows.forEach(row => {
+      stats[row.status] = {
+        count: parseInt(row.count),
+        total: parseFloat(row.total || 0)
+      };
+    });
+
     res.json({
       commissions: result.rows,
-      summary: summary.rows
+      summary: summary.rows,
+      stats: stats,
+      commissionInfo: {
+        howItWorks: [
+          "You earn commission when shops you register get approved by admin",
+          "Standard commission rate is 10% of monthly shop subscription",
+          "Commission status changes from 'pending' → 'approved' → 'paid'",
+          "Payments are processed monthly for approved commissions"
+        ],
+        rates: {
+          standard: "10% of monthly subscription",
+          bonus: "Additional bonuses for high performance"
+        }
+      }
     });
   } catch (error) {
     console.error('Error fetching commissions:', error);
@@ -268,19 +313,49 @@ router.get('/commissions', authenticateToken, requireRole(['sales']), async (req
 router.get('/performance', authenticateToken, requireRole(['sales']), async (req, res) => {
   try {
     const salesId = req.user.userId;
+    const { period = 'current_month', year = new Date().getFullYear() } = req.query;
+
+    // Get overall performance stats
+    const overallStats = await pool.query(
+      `SELECT
+        COUNT(*) as shops_registered,
+        COUNT(*) FILTER (WHERE approval_status = 'approved') as shops_approved,
+        COALESCE(SUM(sc.amount) FILTER (WHERE sc.status = 'approved'), 0) as commission_earned,
+        COALESCE(SUM(sc.amount) FILTER (WHERE sc.status = 'paid'), 0) as commission_paid
+       FROM shops s
+       LEFT JOIN sales_commissions sc ON s.id = sc.shop_id AND sc.sales_user_id = $1
+       WHERE s.registered_by = $1`,
+      [salesId]
+    );
+
+    const stats = overallStats.rows[0];
+    const approvalRate = stats.shops_registered > 0
+      ? (parseInt(stats.shops_approved) / parseInt(stats.shops_registered)) * 100
+      : 0;
+
+    const target = 1500; // Monthly target
+    const achievementRate = target > 0 ? (parseFloat(stats.commission_earned) / target) * 100 : 0;
 
     // Monthly performance
     const monthlyResult = await pool.query(
       `SELECT
-        DATE_TRUNC('month', created_at) as month,
-        COUNT(*) as shops_registered,
-        COUNT(*) FILTER (WHERE approval_status = 'approved') as shops_approved
-       FROM shops
-       WHERE registered_by = $1
-       GROUP BY DATE_TRUNC('month', created_at)
-       ORDER BY month DESC
+        TO_CHAR(DATE_TRUNC('month', s.created_at), 'Month') as month,
+        COUNT(*) as registrations,
+        COUNT(*) FILTER (WHERE s.approval_status = 'approved') as approvals,
+        COALESCE(SUM(sc.amount) FILTER (WHERE sc.status IN ('approved', 'paid')), 0) as earnings,
+        1200 as target,
+        CASE WHEN COUNT(*) > 0
+          THEN (COUNT(*) FILTER (WHERE s.approval_status = 'approved')::float / COUNT(*)::float * 100)
+          ELSE 0
+        END as performance
+       FROM shops s
+       LEFT JOIN sales_commissions sc ON s.id = sc.shop_id AND sc.sales_user_id = $1
+       WHERE s.registered_by = $1
+         AND EXTRACT(YEAR FROM s.created_at) = $2
+       GROUP BY DATE_TRUNC('month', s.created_at)
+       ORDER BY DATE_TRUNC('month', s.created_at) DESC
        LIMIT 12`,
-      [salesId]
+      [salesId, year]
     );
 
     // Shop type breakdown
@@ -294,20 +369,19 @@ router.get('/performance', authenticateToken, requireRole(['sales']), async (req
       [salesId]
     );
 
-    // Revenue generated
-    const revenueResult = await pool.query(
-      `SELECT
-        SUM(i.total_amount) as total_revenue
-       FROM invoices i
-       JOIN shops s ON i.shop_id = s.id
-       WHERE s.registered_by = $1 AND i.status = 'paid'`,
-      [salesId]
-    );
-
     res.json({
+      summary: {
+        period: period === 'current_month' ? 'Current Month' : 'Custom Period',
+        shops_registered: parseInt(stats.shops_registered),
+        shops_approved: parseInt(stats.shops_approved),
+        approval_rate: Math.round(approvalRate * 10) / 10, // Round to 1 decimal
+        commission_earned: parseFloat(stats.commission_earned),
+        commission_paid: parseFloat(stats.commission_paid),
+        target: target,
+        achievement_rate: Math.round(achievementRate * 10) / 10
+      },
       monthly: monthlyResult.rows,
-      shopTypes: shopTypesResult.rows,
-      totalRevenue: revenueResult.rows[0]?.total_revenue || 0
+      shopTypes: shopTypesResult.rows
     });
   } catch (error) {
     console.error('Error fetching performance metrics:', error);
