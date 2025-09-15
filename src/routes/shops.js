@@ -19,8 +19,6 @@ router.get('/', authenticateToken, requireRole(['admin', 'design']), async (req,
         s.phone,
         s.subscription_status,
         s.created_at,
-        s.terms_accepted,
-        s.terms_accepted_date,
         u.full_name as owner_name,
         u.email as owner_email,
         COUNT(DISTINCT sc.id) as screen_count
@@ -111,8 +109,6 @@ router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => 
       phone,
       contract_start_date,
       contract_end_date,
-      terms_accepted,
-      terms_accepted_date
     } = req.body;
 
     await pool.query('BEGIN');
@@ -148,9 +144,6 @@ router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => 
         postcode,
         shop_type,
         phone,
-        terms_accepted,
-        terms_accepted_date,
-        terms_accepted_by,
         contract_start_date,
         contract_end_date
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
@@ -161,9 +154,6 @@ router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => 
         postcode,
         shop_type,
         phone,
-        terms_accepted || false,
-        terms_accepted_date || null,
-        terms_accepted ? req.user.userId : null,
         contract_start_date || null,
         contract_end_date || null
       ]

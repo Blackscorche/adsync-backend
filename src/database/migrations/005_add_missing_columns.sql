@@ -1,14 +1,7 @@
 -- Migration: Add missing columns to existing tables
 -- This migration adds columns that are referenced in the code but missing from the database
 
--- Add terms_accepted column to shops table
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                 WHERE table_name='shops' AND column_name='terms_accepted') THEN
-    ALTER TABLE shops ADD COLUMN terms_accepted BOOLEAN DEFAULT FALSE;
-  END IF;
-END $$;
+-- terms_accepted column removed - handled at login only
 
 -- Add any other missing columns that might be needed
 -- Add commission_rate to shops if missing
@@ -163,7 +156,7 @@ BEGIN
   END IF;
 END $$;
 
-COMMENT ON COLUMN shops.terms_accepted IS 'Whether shop owner has accepted terms and conditions';
+-- terms_accepted comment removed
 COMMENT ON COLUMN shops.commission_rate IS 'Commission rate for sales person';
 COMMENT ON COLUMN shops.subscription_status IS 'Current subscription status (trial, active, suspended, cancelled)';
 COMMENT ON COLUMN shops.trial_ends_at IS 'Date when free trial ends';
