@@ -142,27 +142,13 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
     const isExtraUpload = monthlyUploads >= FREE_UPLOADS_LIMIT;
 
     if (isExtraUpload) {
-      // Check if shop has purchased extra uploads
-      const extraUploadsResult = await pool.query(
-        `SELECT SUM(uploads_purchased) - COUNT(c.id) as remaining
-         FROM extra_uploads eu
-         LEFT JOIN content c ON c.shop_id = eu.shop_id AND c.is_extra_upload = true
-         WHERE eu.shop_id = $1 AND eu.status = 'completed'
-         GROUP BY eu.shop_id`,
-        [shop.id]
-      );
-
-      const hasExtraUploads = extraUploadsResult.rows.length > 0 && 
-                              extraUploadsResult.rows[0].remaining > 0;
-
-      if (!hasExtraUploads) {
-        fs.unlinkSync(req.file.path);
-        return res.status(403).json({
-          error: 'Monthly upload limit reached. Please purchase additional uploads.',
-          monthlyUploads,
-          limit: FREE_UPLOADS_LIMIT
-        });
-      }
+      // For now, just block extra uploads since we don't have the extra_uploads table yet
+      fs.unlinkSync(req.file.path);
+      return res.status(403).json({
+        error: 'Monthly upload limit reached. Please purchase additional uploads.',
+        monthlyUploads,
+        limit: FREE_UPLOADS_LIMIT
+      });
     }
 
     // Determine file type
@@ -436,11 +422,9 @@ router.get('/stats', authenticateToken, requireRole(['owner', 'admin']), async (
         COUNT(CASE WHEN c.status = 'pending' THEN 1 END) as pending_count,
         COUNT(CASE WHEN c.status = 'approved' THEN 1 END) as approved_count,
         COUNT(CASE WHEN c.status = 'rejected' THEN 1 END) as rejected_count,
-        COALESCE(SUM(eu.uploads_purchased), 0) -
-        COUNT(CASE WHEN c.is_extra_upload = true THEN 1 END) as extra_uploads_remaining
+        0 as extra_uploads_remaining
        FROM shops s
        LEFT JOIN content c ON s.id = c.shop_id
-       LEFT JOIN extra_uploads eu ON s.id = eu.shop_id AND eu.status = 'completed'
        WHERE s.id = $1
        GROUP BY s.id`,
       [shopId, currentMonth + '-01']

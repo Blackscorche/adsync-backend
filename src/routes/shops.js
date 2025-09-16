@@ -174,14 +174,15 @@ router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => 
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const shopId = req.params.id;
-    const { 
-      name, 
-      address, 
+    const {
+      name,
+      address,
       postcode,
       shop_type,
       phone,
       contract_start_date,
-      contract_end_date
+      contract_end_date,
+      designer_id
     } = req.body;
 
     // Check access
@@ -229,7 +230,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
       updates.push(`contract_end_date = $${paramCount}`);
       values.push(contract_end_date);
     }
-    
+    if (designer_id !== undefined) {
+      paramCount++;
+      updates.push(`designer_id = $${paramCount}`);
+      values.push(designer_id);
+    }
+
     paramCount++;
     values.push(shopId);
     

@@ -32,6 +32,42 @@ router.get('/my-shops', authenticateToken, requireRole(['design']), async (req, 
   }
 });
 
+router.get('/assigned-shops', authenticateToken, requireRole(['design']), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+        s.id,
+        s.name,
+        s.address,
+        s.phone,
+        s.shop_type,
+        s.photo_url,
+        s.postcode,
+        s.city,
+        s.created_at,
+        u.email,
+        u.full_name as owner_name,
+        COUNT(DISTINCT sc.id) as screen_count,
+        COUNT(DISTINCT c.id) as content_count,
+        COUNT(DISTINCT p.id) as playlist_count
+       FROM shops s
+       LEFT JOIN users u ON s.owner_id = u.id
+       LEFT JOIN screens sc ON s.id = sc.shop_id
+       LEFT JOIN content c ON s.id = c.shop_id
+       LEFT JOIN playlists p ON s.id = p.shop_id
+       WHERE s.designer_id = $1 AND s.approval_status = 'approved'
+       GROUP BY s.id, u.email, u.full_name
+       ORDER BY s.name`,
+      [req.user.userId]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching assigned shops:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Get content for designer's shops that needs design
 router.get('/pending-content', authenticateToken, requireRole(['design']), async (req, res) => {
   try {
