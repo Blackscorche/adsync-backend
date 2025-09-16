@@ -9,7 +9,10 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin image loading
+  contentSecurityPolicy: false // Disable CSP for now to avoid blocking resources
+}));
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
@@ -26,11 +29,20 @@ app.use('/api', limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Static file serving for uploaded content
-app.use('/uploads/content', express.static(path.join(__dirname, '../uploads/content')));
-app.use('/uploads/thumbnails', express.static(path.join(__dirname, '../uploads/thumbnails')));
-app.use('/uploads/shops', express.static(path.join(__dirname, '../uploads/shops')));
-app.use('/uploads/tickets', express.static(path.join(__dirname, '../uploads/tickets')));
+// Middleware to add CORS headers for static files
+const staticCors = (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+};
+
+// Static file serving for uploaded content with CORS
+app.use('/uploads/content', staticCors, express.static(path.join(__dirname, '../uploads/content')));
+app.use('/uploads/thumbnails', staticCors, express.static(path.join(__dirname, '../uploads/thumbnails')));
+app.use('/uploads/shops', staticCors, express.static(path.join(__dirname, '../uploads/shops')));
+app.use('/uploads/tickets', staticCors, express.static(path.join(__dirname, '../uploads/tickets')));
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));

@@ -21,6 +21,7 @@ router.get('/shops', authenticateToken, requireRole(['admin']), async (req, res)
         s.approval_status,
         s.subscription_status,
         s.rejection_reason,
+        s.photo_url,
         s.owner_id,
         s.designer_id,
         s.registered_by,
@@ -227,10 +228,6 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
         await emailService.sendShopApprovalEmail(shopId);
 
       } else {
-        // Delete owner account if rejected
-        await pool.query('DELETE FROM users WHERE id = $1', [shop.owner_id]);
-
-        // Notify sales team
         await pool.query(
           `INSERT INTO notifications (user_id, type, title, message, data)
            VALUES ($1, 'shop_rejected', 'Shop Registration Rejected',

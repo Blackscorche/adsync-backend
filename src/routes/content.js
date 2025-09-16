@@ -114,10 +114,10 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
 
     // Get shop_id for the owner
     const shopResult = await pool.query(
-      'SELECT id, free_uploads_used, free_uploads_limit FROM shops WHERE owner_id = $1',
+      'SELECT id FROM shops WHERE owner_id = $1',
       [req.user.userId]
     );
-    
+
     if (shopResult.rows.length === 0) {
       // Delete uploaded file
       fs.unlinkSync(req.file.path);
@@ -125,20 +125,21 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
     }
 
     const shop = shopResult.rows[0];
-    
-    // Check upload limits
+    const FREE_UPLOADS_LIMIT = 1; // Each shop gets 1 free upload per month
+
+    // Check upload limits - count uploads for current month
     const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
     const uploadCountResult = await pool.query(
-      `SELECT COUNT(*) as count FROM content 
-       WHERE shop_id = $1 
-       AND created_at >= $2::date 
+      `SELECT COUNT(*) as count FROM content
+       WHERE shop_id = $1
+       AND created_at >= $2::date
        AND created_at < ($2::date + interval '1 month')
        AND is_extra_upload = false`,
       [shop.id, currentMonth + '-01']
     );
 
     const monthlyUploads = parseInt(uploadCountResult.rows[0].count);
-    const isExtraUpload = monthlyUploads >= shop.free_uploads_limit;
+    const isExtraUpload = monthlyUploads >= FREE_UPLOADS_LIMIT;
 
     if (isExtraUpload) {
       // Check if shop has purchased extra uploads
@@ -156,10 +157,10 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
 
       if (!hasExtraUploads) {
         fs.unlinkSync(req.file.path);
-        return res.status(403).json({ 
+        return res.status(403).json({
           error: 'Monthly upload limit reached. Please purchase additional uploads.',
           monthlyUploads,
-          limit: shop.free_uploads_limit
+          limit: FREE_UPLOADS_LIMIT
         });
       }
     }
@@ -179,9 +180,9 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
 
     // Insert content record
     const result = await pool.query(
-      `INSERT INTO content 
-       (shop_id, uploaded_by, filename, file_url, file_type, file_size, thumbnail_url, status, is_extra_upload)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO content
+       (shop_id, uploaded_by, original_filename, file_url, file_type, status, is_extra_upload)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [
         shop.id,
@@ -189,8 +190,6 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
         req.file.originalname,
         fileUrl,
         fileType,
-        req.file.size,
-        thumbnailUrl,
         'pending',
         isExtraUpload
       ]
@@ -429,22 +428,21 @@ router.get('/stats', authenticateToken, requireRole(['owner', 'admin']), async (
     const currentMonth = new Date().toISOString().slice(0, 7);
     
     const stats = await pool.query(
-      `SELECT 
-        s.free_uploads_limit,
-        COUNT(CASE WHEN c.created_at >= $2::date 
+      `SELECT
+        COUNT(CASE WHEN c.created_at >= $2::date
                     AND c.created_at < ($2::date + interval '1 month')
-                    AND c.is_extra_upload = false 
+                    AND c.is_extra_upload = false
                     THEN 1 END) as monthly_uploads,
         COUNT(CASE WHEN c.status = 'pending' THEN 1 END) as pending_count,
         COUNT(CASE WHEN c.status = 'approved' THEN 1 END) as approved_count,
         COUNT(CASE WHEN c.status = 'rejected' THEN 1 END) as rejected_count,
-        COALESCE(SUM(eu.uploads_purchased), 0) - 
+        COALESCE(SUM(eu.uploads_purchased), 0) -
         COUNT(CASE WHEN c.is_extra_upload = true THEN 1 END) as extra_uploads_remaining
        FROM shops s
        LEFT JOIN content c ON s.id = c.shop_id
        LEFT JOIN extra_uploads eu ON s.id = eu.shop_id AND eu.status = 'completed'
        WHERE s.id = $1
-       GROUP BY s.id, s.free_uploads_limit`,
+       GROUP BY s.id`,
       [shopId, currentMonth + '-01']
     );
 

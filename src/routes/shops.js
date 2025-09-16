@@ -10,13 +10,14 @@ router.get('/', authenticateToken, requireRole(['admin', 'design']), async (req,
     const { shop_type, city } = req.query;
     
     let query = `
-      SELECT 
-        s.id, 
-        s.name, 
+      SELECT
+        s.id,
+        s.name,
         s.address,
         s.postcode,
         s.shop_type,
         s.phone,
+        s.photo_url,
         s.subscription_status,
         s.created_at,
         u.full_name as owner_name,

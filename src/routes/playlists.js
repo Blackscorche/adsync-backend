@@ -138,7 +138,7 @@ router.post('/', authenticateToken, requireRole(['design', 'admin']), async (req
     if (req.user.role === 'design') {
       // Verify designer is assigned to this shop
       const assignmentCheck = await pool.query(
-        'SELECT id FROM shops WHERE id = $1 AND assigned_designer_id = $2',
+        'SELECT id FROM shops WHERE id = $1 AND designer_id = $2',
         [shopId, req.user.userId]
       );
 

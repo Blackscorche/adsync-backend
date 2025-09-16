@@ -17,7 +17,7 @@ class EmailService {
         `SELECT s.*, u.email, u.full_name, d.full_name as designer_name
          FROM shops s
          JOIN users u ON s.owner_id = u.id
-         LEFT JOIN users d ON s.assigned_designer_id = d.id
+         LEFT JOIN users d ON s.designer_id = d.id
          WHERE s.id = $1`,
         [shopId]
       );
@@ -95,7 +95,7 @@ class EmailService {
         `SELECT c.*, s.name as shop_name, u.email as designer_email, u.full_name as designer_name
          FROM contents c
          JOIN shops s ON c.shop_id = s.id
-         LEFT JOIN users u ON s.assigned_designer_id = u.id
+         LEFT JOIN users u ON s.designer_id = u.id
          WHERE c.id = $1`,
         [contentId]
       );
