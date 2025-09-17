@@ -1,7 +1,10 @@
 const express = require('express');
 const pool = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy');
+const emailService = require('../services/email');
+
+// Initialize Stripe with your secret key
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_51OHJGxSJZRvNQz1eXrYgLqMz1zXqHfKJ0KqLZAJYFhXx5X0XqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXq');
 
 const router = express.Router();
 
@@ -12,11 +15,12 @@ router.post('/create-intent', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     const userRole = req.user.role;
 
-    // Get bill details
+    // Get bill details with user email
     const billResult = await pool.query(
-      `SELECT b.*, s.name as shop_name, s.owner_id
+      `SELECT b.*, s.name as shop_name, s.owner_id, u.email as owner_email
        FROM bills b
        JOIN shops s ON b.shop_id = s.id
+       JOIN users u ON s.owner_id = u.id
        WHERE b.id = $1 AND b.status = 'pending'`,
       [billId]
     );
@@ -41,9 +45,14 @@ router.post('/create-intent', authenticateToken, async (req, res) => {
       metadata: {
         bill_id: bill.id,
         invoice_number: bill.invoice_number,
-        shop_name: bill.shop_name
+        shop_name: bill.shop_name,
+        shop_id: bill.shop_id
       },
-      description: `Payment for invoice ${bill.invoice_number}`
+      description: `IVAA AdSync - Invoice ${bill.invoice_number}`,
+      receipt_email: bill.owner_email,
+      automatic_payment_methods: {
+        enabled: true,
+      },
     });
 
     // Store payment intent ID in database
@@ -66,7 +75,94 @@ router.post('/create-intent', authenticateToken, async (req, res) => {
   }
 });
 
-// Confirm payment webhook (called by Stripe)
+// Confirm payment (called after successful payment)
+router.post('/confirm', authenticateToken, async (req, res) => {
+  try {
+    const { billId, paymentIntentId } = req.body;
+
+    // Verify payment intent with Stripe
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    if (paymentIntent.status !== 'succeeded') {
+      return res.status(400).json({ error: 'Payment not successful' });
+    }
+
+    // Update bill status
+    const result = await pool.query(
+      `UPDATE bills
+       SET status = 'paid',
+           payment_method = 'card',
+           payment_reference = $1,
+           payment_date = NOW(),
+           updated_at = NOW()
+       WHERE id = $2 AND payment_intent_id = $1
+       RETURNING *`,
+      [paymentIntentId, billId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Bill not found' });
+    }
+
+    const bill = result.rows[0];
+
+    // Get shop and owner details for email
+    const shopResult = await pool.query(
+      `SELECT s.name as shop_name, u.email, u.full_name
+       FROM shops s
+       JOIN users u ON s.owner_id = u.id
+       WHERE s.id = $1`,
+      [bill.shop_id]
+    );
+
+    if (shopResult.rows.length > 0) {
+      const shop = shopResult.rows[0];
+
+      // Send payment confirmation email
+      await emailService.sendPaymentConfirmation(
+        shop.email,
+        shop.full_name,
+        bill.invoice_number,
+        bill.total_amount,
+        new Date()
+      );
+
+      // Create notification for admin
+      const adminResult = await pool.query(
+        `SELECT id FROM users WHERE role = 'admin'`
+      );
+
+      for (const admin of adminResult.rows) {
+        await pool.query(
+          `INSERT INTO notifications (user_id, type, title, message, data)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            admin.id,
+            'payment_received',
+            'Payment Received',
+            `Payment received for ${shop.shop_name} - Invoice ${bill.invoice_number}`,
+            JSON.stringify({
+              bill_id: bill.id,
+              amount: bill.total_amount,
+              shop_name: shop.shop_name
+            })
+          ]
+        );
+      }
+    }
+
+    res.json({
+      message: 'Payment confirmed successfully',
+      bill: bill
+    });
+
+  } catch (error) {
+    console.error('Confirm payment error:', error);
+    res.status(500).json({ error: 'Failed to confirm payment' });
+  }
+});
+
+// Stripe webhook handler (for automatic updates)
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -152,8 +248,8 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   res.json({ received: true });
 });
 
-// Get payment methods for a shop
-router.get('/methods', authenticateToken, async (req, res) => {
+// Get payment configuration
+router.get('/config', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     const userRole = req.user.role;
@@ -162,67 +258,54 @@ router.get('/methods', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
-    // For now, return supported payment methods
-    // In production, you'd fetch saved payment methods from Stripe
+    // Return Stripe publishable key for frontend
     res.json({
-      methods: [
-        { id: 'card', name: 'Credit/Debit Card', enabled: true },
-        { id: 'bank_transfer', name: 'Bank Transfer', enabled: true },
-        { id: 'direct_debit', name: 'Direct Debit', enabled: false }
-      ]
+      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || 'pk_test_51OHJGxSJZRvNQz1eXrYgLqMz1zXqHfKJ0KqLZAJYFhXx5X0XqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXq',
+      supportedPaymentMethods: ['card'],
+      currency: 'gbp'
     });
 
   } catch (error) {
-    console.error('Get payment methods error:', error);
+    console.error('Get payment config error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Process manual payment (for admin recording bank transfers)
-router.post('/manual', authenticateToken, requireRole(['admin']), async (req, res) => {
+// Get payment history for a shop
+router.get('/history/:shopId', authenticateToken, async (req, res) => {
   try {
-    const { billId, payment_method, payment_reference, payment_date, amount } = req.body;
+    const { shopId } = req.params;
+    const userId = req.user.userId;
+    const userRole = req.user.role;
 
-    // Get bill details
-    const billResult = await pool.query(
-      `SELECT * FROM bills WHERE id = $1`,
-      [billId]
-    );
-
-    if (billResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Bill not found' });
+    // Check permissions
+    if (userRole === 'owner') {
+      const shopCheck = await pool.query(
+        'SELECT id FROM shops WHERE id = $1 AND owner_id = $2',
+        [shopId, userId]
+      );
+      if (shopCheck.rows.length === 0) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+    } else if (userRole !== 'admin') {
+      return res.status(403).json({ error: 'Unauthorized' });
     }
 
-    const bill = billResult.rows[0];
-
-    // Validate amount matches
-    if (Math.abs(bill.total_amount - amount) > 0.01) {
-      return res.status(400).json({
-        error: 'Payment amount does not match bill total',
-        expected: bill.total_amount,
-        received: amount
-      });
-    }
-
-    // Update bill status
-    await pool.query(
-      `UPDATE bills
-       SET status = 'paid',
-           payment_method = $1,
-           payment_reference = $2,
-           payment_date = $3,
-           updated_at = NOW()
-       WHERE id = $4`,
-      [payment_method, payment_reference, payment_date || new Date(), billId]
+    // Get payment history
+    const result = await pool.query(
+      `SELECT b.*,
+              CASE WHEN b.payment_intent_id IS NOT NULL THEN 'online' ELSE 'manual' END as payment_type
+       FROM bills b
+       WHERE b.shop_id = $1 AND b.status = 'paid'
+       ORDER BY b.payment_date DESC
+       LIMIT 50`,
+      [shopId]
     );
 
-    res.json({
-      message: 'Payment recorded successfully',
-      bill_id: billId
-    });
+    res.json(result.rows);
 
   } catch (error) {
-    console.error('Manual payment error:', error);
+    console.error('Get payment history error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
