@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "migrate": "node src/database/migrate.js",
-    "migrate:update": "node src/database/update.js",
-    "seed": "node src/database/seed.js"
+    "db:migrate": "node src/database/migrate.js",
+    "db:rollback": "node src/database/migrate.js rollback",
+    "db:reset": "node src/database/migrate.js reset",
+    "db:seed": "node src/database/seed.js"
   },
   "dependencies": {
     "axios": "^1.12.1",

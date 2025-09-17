@@ -69,34 +69,76 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
 // Create new screen
 router.post('/', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+
   try {
-    const { shopId, name, location, deviceId } = req.body;
+    const { shopId, name, location, deviceId, size = '32_inch' } = req.body;
 
     // Check access
     if (req.user.role === 'owner' && req.user.shopId !== shopId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
+    await client.query('BEGIN');
+
+    // Check shop payment status
+    const shopResult = await client.query(
+      'SELECT payment_status FROM shops WHERE id = $1 FOR UPDATE',
+      [shopId]
+    );
+
+    if (shopResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Shop not found' });
+    }
+
+    if (shopResult.rows[0].payment_status !== 'active') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: 'Shop is inactive. Please pay outstanding bills to add screens.',
+        payment_status: shopResult.rows[0].payment_status
+      });
+    }
+
     // Check if device ID already exists
     if (deviceId) {
-      const existing = await pool.query(
+      const existing = await client.query(
         'SELECT id FROM screens WHERE device_id = $1',
         [deviceId]
       );
       if (existing.rows.length > 0) {
+        await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Device ID already registered' });
       }
     }
 
-    const result = await pool.query(
-      'INSERT INTO screens (shop_id, name, location, device_id) VALUES ($1, $2, $3, $4) RETURNING *',
-      [shopId, name, location, deviceId]
+    // Determine monthly cost based on size
+    const monthlyCosts = {
+      '32_inch': 15.00,
+      '43_inch': 20.00,
+      '55_inch': 25.00
+    };
+    const monthlyCost = monthlyCosts[size] || 15.00;
+
+    const result = await client.query(
+      `INSERT INTO screens (shop_id, name, location, device_id, size, monthly_cost, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'active')
+       RETURNING *`,
+      [shopId, name, location, deviceId, size, monthlyCost]
     );
 
-    res.status(201).json(result.rows[0]);
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      ...result.rows[0],
+      message: `Screen added. Monthly subscription: £${monthlyCost.toFixed(2)}`
+    });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error creating screen:', error);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 

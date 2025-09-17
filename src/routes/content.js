@@ -107,48 +107,93 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // Upload content (owner only)
 router.post('/upload', authenticateToken, requireRole(['owner']), upload.single('file'), async (req, res) => {
+  const client = await pool.connect();
+
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Get shop_id for the owner
-    const shopResult = await pool.query(
-      'SELECT id FROM shops WHERE owner_id = $1',
+    await client.query('BEGIN');
+
+    // Get shop details including credit balance and payment status
+    const shopResult = await client.query(
+      `SELECT id, credit_balance, payment_status, free_upload_used
+       FROM shops
+       WHERE owner_id = $1
+       FOR UPDATE`,
       [req.user.userId]
     );
 
     if (shopResult.rows.length === 0) {
-      // Delete uploaded file
       fs.unlinkSync(req.file.path);
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Shop not found for this owner' });
     }
 
     const shop = shopResult.rows[0];
-    const FREE_UPLOADS_LIMIT = 1; // Each shop gets 1 free upload per month
 
-    // Check upload limits - count uploads for current month
+    // Check if shop is active
+    if (shop.payment_status !== 'active') {
+      fs.unlinkSync(req.file.path);
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: 'Shop is inactive. Please pay outstanding bills to continue.',
+        payment_status: shop.payment_status
+      });
+    }
+
+    const UPLOAD_COST = 3.00;
+    let chargeAmount = 0;
+    let wasFreeUpload = false;
+
+    // Check if this month's free upload has been used
     const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
-    const uploadCountResult = await pool.query(
-      `SELECT COUNT(*) as count FROM content
+    const monthlyUploadResult = await client.query(
+      `SELECT COUNT(*) as count
+       FROM content
        WHERE shop_id = $1
        AND created_at >= $2::date
        AND created_at < ($2::date + interval '1 month')
-       AND is_extra_upload = false`,
+       AND was_free_upload = true`,
       [shop.id, currentMonth + '-01']
     );
 
-    const monthlyUploads = parseInt(uploadCountResult.rows[0].count);
-    const isExtraUpload = monthlyUploads >= FREE_UPLOADS_LIMIT;
+    const hasUsedFreeUpload = parseInt(monthlyUploadResult.rows[0].count) > 0;
 
-    if (isExtraUpload) {
-      // For now, just block extra uploads since we don't have the extra_uploads table yet
-      fs.unlinkSync(req.file.path);
-      return res.status(403).json({
-        error: 'Monthly upload limit reached. Please purchase additional uploads.',
-        monthlyUploads,
-        limit: FREE_UPLOADS_LIMIT
-      });
+    if (!hasUsedFreeUpload) {
+      // This is the free monthly upload
+      wasFreeUpload = true;
+      chargeAmount = 0;
+    } else {
+      // This is a paid upload - check credit balance
+      if (shop.credit_balance < UPLOAD_COST) {
+        fs.unlinkSync(req.file.path);
+        await client.query('ROLLBACK');
+        return res.status(402).json({
+          error: 'Insufficient credit balance. Please top up to continue.',
+          required_amount: UPLOAD_COST,
+          current_balance: parseFloat(shop.credit_balance),
+          message: 'You need at least £3.00 credit to upload additional content'
+        });
+      }
+
+      // Deduct credit using the stored function
+      const deductResult = await client.query(
+        'SELECT deduct_credit($1, $2, $3, $4) as success',
+        [shop.id, UPLOAD_COST, 'upload_charge', 'Content upload']
+      );
+
+      if (!deductResult.rows[0].success) {
+        fs.unlinkSync(req.file.path);
+        await client.query('ROLLBACK');
+        return res.status(402).json({
+          error: 'Failed to deduct credit. Please try again.',
+          current_balance: parseFloat(shop.credit_balance)
+        });
+      }
+
+      chargeAmount = UPLOAD_COST;
     }
 
     // Determine file type
@@ -160,15 +205,16 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
       fileType = 'pdf';
     }
 
-    // Create file URL (without /api prefix, like shop photos)
+    // Create file URL
     const fileUrl = `/uploads/content/${req.file.filename}`;
-    const thumbnailUrl = `/uploads/thumbnails/${req.file.filename}`; // TODO: Generate actual thumbnail
+    const thumbnailUrl = `/uploads/thumbnails/${req.file.filename}`;
 
-    // Insert content record
-    const result = await pool.query(
+    // Insert content record with charge information
+    const result = await client.query(
       `INSERT INTO content
-       (shop_id, uploaded_by, original_filename, file_url, file_type, status, is_extra_upload)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (shop_id, uploaded_by, original_filename, file_url, file_type, status,
+        was_free_upload, charge_amount)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         shop.id,
@@ -177,23 +223,27 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
         fileUrl,
         fileType,
         'pending',
-        isExtraUpload
+        wasFreeUpload,
+        chargeAmount
       ]
     );
 
     // Get updated balance
-    const updatedShopResult = await pool.query(
+    const updatedShopResult = await client.query(
       'SELECT credit_balance FROM shops WHERE id = $1',
       [shop.id]
     );
 
+    await client.query('COMMIT');
+
     res.status(201).json({
       message: wasFreeUpload
         ? 'Content uploaded successfully (free monthly upload)'
-        : `Content uploaded successfully (£${chargeAmount} charged)`,
+        : `Content uploaded successfully (£${chargeAmount.toFixed(2)} charged)`,
       content: result.rows[0],
-      credit_balance: updatedShopResult.rows[0].credit_balance,
-      charge: chargeAmount
+      credit_balance: parseFloat(updatedShopResult.rows[0].credit_balance),
+      charge: chargeAmount,
+      was_free: wasFreeUpload
     });
   } catch (error) {
     await client.query('ROLLBACK');
