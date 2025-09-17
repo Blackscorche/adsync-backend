@@ -200,19 +200,40 @@ router.patch('/:id/start-design', authenticateToken, requireRole(['design']), as
   try {
     const { id } = req.params;
 
+    // First check if designer has access to this content's shop
+    const accessCheck = await pool.query(
+      `SELECT c.*, s.designer_id
+       FROM content c
+       JOIN shops s ON c.shop_id = s.id
+       WHERE c.id = $1`,
+      [id]
+    );
+
+    if (accessCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Content not found' });
+    }
+
+    const content = accessCheck.rows[0];
+
+    // Verify designer is assigned to this shop
+    if (content.designer_id !== req.user.userId) {
+      return res.status(403).json({ error: 'You are not assigned to this shop' });
+    }
+
+    // Verify content is in pending or rejected status (can re-work rejected content)
+    if (content.status !== 'pending' && content.status !== 'rejected') {
+      return res.status(400).json({ error: 'Content must be in pending or rejected status' });
+    }
+
     const result = await pool.query(
       `UPDATE content
        SET status = 'in_design',
            designed_by = $1,
            designed_at = CURRENT_TIMESTAMP
-       WHERE id = $2 AND status = 'pending'
+       WHERE id = $2
        RETURNING *`,
       [req.user.userId, id]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Content not found or already in design' });
-    }
 
     res.json({
       message: 'Content marked as in design',
@@ -233,6 +254,34 @@ router.post('/:id/upload-design', authenticateToken, requireRole(['design']), up
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
+    // Check if designer has access to this content's shop
+    const accessCheck = await pool.query(
+      `SELECT c.*, s.designer_id
+       FROM content c
+       JOIN shops s ON c.shop_id = s.id
+       WHERE c.id = $1`,
+      [id]
+    );
+
+    if (accessCheck.rows.length === 0) {
+      fs.unlinkSync(req.file.path);
+      return res.status(404).json({ error: 'Content not found' });
+    }
+
+    const content = accessCheck.rows[0];
+
+    // Verify designer is assigned to this shop
+    if (content.designer_id !== req.user.userId) {
+      fs.unlinkSync(req.file.path);
+      return res.status(403).json({ error: 'You are not assigned to this shop' });
+    }
+
+    // Verify content is in in_design status
+    if (content.status !== 'in_design') {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Content must be in design phase. Please click "Start Design" first.' });
+    }
+
     const fileUrl = `/uploads/content/${req.file.filename}`;
 
     const result = await pool.query(
@@ -241,15 +290,10 @@ router.post('/:id/upload-design', authenticateToken, requireRole(['design']), up
            designed_file_url = $1,
            designed_by = $2,
            designed_at = CURRENT_TIMESTAMP
-       WHERE id = $3 AND status = 'in_design'
+       WHERE id = $3
        RETURNING *`,
       [fileUrl, req.user.userId, id]
     );
-
-    if (result.rows.length === 0) {
-      fs.unlinkSync(req.file.path);
-      return res.status(404).json({ error: 'Content not found or not in design phase' });
-    }
 
     res.json({
       message: 'Designed content uploaded for admin review',
@@ -320,19 +364,40 @@ router.patch('/:id/publish', authenticateToken, requireRole(['design']), async (
   try {
     const { id } = req.params;
 
+    // Check if designer has access to this content's shop
+    const accessCheck = await pool.query(
+      `SELECT c.*, s.designer_id, s.name as shop_name
+       FROM content c
+       JOIN shops s ON c.shop_id = s.id
+       WHERE c.id = $1`,
+      [id]
+    );
+
+    if (accessCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Content not found' });
+    }
+
+    const content = accessCheck.rows[0];
+
+    // Verify designer is assigned to this shop
+    if (content.designer_id !== req.user.userId) {
+      return res.status(403).json({ error: 'You are not assigned to this shop' });
+    }
+
+    // Verify content is approved
+    if (content.status !== 'approved') {
+      return res.status(400).json({ error: 'Content must be approved before publishing' });
+    }
+
     const result = await pool.query(
       `UPDATE content
        SET status = 'published',
            published_by = $1,
            published_at = CURRENT_TIMESTAMP
-       WHERE id = $2 AND status = 'approved'
+       WHERE id = $2
        RETURNING *`,
       [req.user.userId, id]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Content not found or not approved for publishing' });
-    }
 
     res.json({
       message: 'Content published successfully',

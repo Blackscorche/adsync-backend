@@ -68,20 +68,30 @@ router.get('/assigned-shops', authenticateToken, requireRole(['design']), async 
   }
 });
 
-// Get content for designer's shops that needs design
+// Get content for designer's shops that needs design or has been rejected
 router.get('/pending-content', authenticateToken, requireRole(['design']), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT
         c.*,
         s.name as shop_name,
-        u.full_name as uploaded_by_name
+        u.full_name as uploaded_by_name,
+        r.full_name as reviewed_by_name
        FROM content c
        JOIN shops s ON c.shop_id = s.id
        LEFT JOIN users u ON c.uploaded_by = u.id
+       LEFT JOIN users r ON c.reviewed_by = r.id
        WHERE s.designer_id = $1
-         AND c.status IN ('pending', 'in_design')
-       ORDER BY c.created_at DESC`,
+         AND c.status IN ('pending', 'in_design', 'rejected', 'designed', 'approved')
+       ORDER BY
+         CASE
+           WHEN c.status = 'rejected' THEN 0
+           WHEN c.status = 'pending' THEN 1
+           WHEN c.status = 'in_design' THEN 2
+           WHEN c.status = 'designed' THEN 3
+           ELSE 4
+         END,
+         c.created_at DESC`,
       [req.user.userId]
     );
 
