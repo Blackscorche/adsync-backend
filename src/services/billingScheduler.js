@@ -1,0 +1,200 @@
+const cron = require('node-cron');
+const pool = require('../config/database');
+const emailService = require('./email');
+
+class BillingScheduler {
+  start() {
+    console.log('Starting billing scheduler...');
+
+    // Run every day at 2 AM to generate monthly invoices on the 1st
+    cron.schedule('0 2 1 * *', this.generateMonthlyInvoices);
+
+    // Run every day at 3 AM to check overdue bills
+    cron.schedule('0 3 * * *', this.checkOverdueBills);
+
+    // Run every day at 4 AM to check for shops to terminate
+    cron.schedule('0 4 * * *', this.checkShopsForTermination);
+  }
+
+  async generateMonthlyInvoices() {
+    console.log('Generating monthly invoices...');
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Get all active shops
+      const shopsResult = await client.query(`
+        SELECT s.*, u.email, u.full_name
+        FROM shops s
+        JOIN users u ON s.owner_id = u.id
+        WHERE s.approval_status = 'approved'
+        AND s.payment_status != 'terminated'
+      `);
+
+      const today = new Date();
+      const billingStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const billingEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+
+      for (const shop of shopsResult.rows) {
+        // Calculate screen subscription charges only (not content - that's prepaid now)
+        const screenCharges =
+          (shop.screen_32_count || 0) * (shop.screen_32_price || 15) +
+          (shop.screen_43_count || 0) * (shop.screen_43_price || 20) +
+          (shop.screen_55_count || 0) * (shop.screen_55_price || 25);
+
+        if (screenCharges > 0) {
+          const subtotal = screenCharges;
+          const vat = subtotal * 0.20;
+          const total = subtotal + vat;
+
+          const invoiceNumber = `INV-${shop.id}-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}`;
+
+          // Create bill
+          await client.query(`
+            INSERT INTO bills (
+              shop_id, invoice_number, billing_period_start, billing_period_end,
+              screen_charges, content_charges, subtotal, vat_amount, total_amount,
+              status, payment_due_date, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+          `, [
+            shop.id, invoiceNumber, billingStart, billingEnd,
+            screenCharges, 0, subtotal, vat, total,
+            'pending',
+            new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days to pay
+          ]);
+
+          // Send invoice email
+          await emailService.sendInvoice(
+            shop.email,
+            shop.full_name,
+            invoiceNumber,
+            total
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+      console.log(`Generated invoices for ${shopsResult.rows.length} shops`);
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error generating invoices:', error);
+    } finally {
+      client.release();
+    }
+  }
+
+  async checkOverdueBills() {
+    console.log('Checking for overdue bills...');
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Find bills that are 7+ days overdue
+      const overdueBillsResult = await client.query(`
+        SELECT b.*, s.id as shop_id, s.name as shop_name,
+               u.email, u.full_name,
+               DATE_PART('day', NOW() - b.payment_due_date) as days_overdue
+        FROM bills b
+        JOIN shops s ON b.shop_id = s.id
+        JOIN users u ON s.owner_id = u.id
+        WHERE b.status = 'pending'
+        AND b.payment_due_date < NOW()
+        AND s.payment_status = 'active'
+      `);
+
+      for (const bill of overdueBillsResult.rows) {
+        if (bill.days_overdue >= 7) {
+          // Mark shop as inactive
+          await client.query(
+            `UPDATE shops SET payment_status = 'inactive' WHERE id = $1`,
+            [bill.shop_id]
+          );
+
+          // Update bill status
+          await client.query(
+            `UPDATE bills SET status = 'overdue', days_overdue = $1 WHERE id = $2`,
+            [bill.days_overdue, bill.id]
+          );
+
+          // Send notification
+          await emailService.sendOverdueNotice(
+            bill.email,
+            bill.full_name,
+            bill.invoice_number,
+            bill.total_amount,
+            bill.days_overdue
+          );
+
+          console.log(`Shop ${bill.shop_name} marked inactive - ${bill.days_overdue} days overdue`);
+        }
+      }
+
+      await client.query('COMMIT');
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error checking overdue bills:', error);
+    } finally {
+      client.release();
+    }
+  }
+
+  async checkShopsForTermination() {
+    console.log('Checking for shops to terminate...');
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Find shops with bills 30+ days overdue
+      const terminationResult = await client.query(`
+        SELECT DISTINCT s.*, u.email, u.full_name,
+               MIN(b.payment_due_date) as oldest_due_date,
+               DATE_PART('day', NOW() - MIN(b.payment_due_date)) as days_overdue
+        FROM shops s
+        JOIN bills b ON s.id = b.shop_id
+        JOIN users u ON s.owner_id = u.id
+        WHERE s.payment_status = 'inactive'
+        AND b.status IN ('pending', 'overdue')
+        GROUP BY s.id, u.email, u.full_name
+        HAVING DATE_PART('day', NOW() - MIN(b.payment_due_date)) >= 30
+      `);
+
+      for (const shop of terminationResult.rows) {
+        // Mark shop as terminated
+        await client.query(
+          `UPDATE shops SET payment_status = 'terminated' WHERE id = $1`,
+          [shop.id]
+        );
+
+        // Delete all shop data (cascade will handle related records)
+        await client.query(
+          `DELETE FROM shops WHERE id = $1`,
+          [shop.id]
+        );
+
+        // Send termination notice
+        await emailService.sendTerminationNotice(
+          shop.email,
+          shop.full_name,
+          shop.name
+        );
+
+        console.log(`Shop ${shop.name} terminated - ${shop.days_overdue} days overdue`);
+      }
+
+      await client.query('COMMIT');
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error checking for termination:', error);
+    } finally {
+      client.release();
+    }
+  }
+}
+
+module.exports = new BillingScheduler();

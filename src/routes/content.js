@@ -181,17 +181,29 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
       ]
     );
 
+    // Get updated balance
+    const updatedShopResult = await pool.query(
+      'SELECT credit_balance FROM shops WHERE id = $1',
+      [shop.id]
+    );
+
     res.status(201).json({
-      message: 'Content uploaded successfully and pending approval',
+      message: wasFreeUpload
+        ? 'Content uploaded successfully (free monthly upload)'
+        : `Content uploaded successfully (£${chargeAmount} charged)`,
       content: result.rows[0],
-      isExtraUpload
+      credit_balance: updatedShopResult.rows[0].credit_balance,
+      charge: chargeAmount
     });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error uploading content:', error);
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 

@@ -4,6 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const billingScheduler = require('./services/billingScheduler');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -89,4 +90,8 @@ app.listen(PORT, () => {
   Environment: ${process.env.NODE_ENV || 'development'}
   ================================
   `);
+
+  // Start billing scheduler
+  billingScheduler.start();
+  console.log('  ✅ Billing scheduler started\n');
 });

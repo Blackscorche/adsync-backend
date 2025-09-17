@@ -8,7 +8,169 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_51OHJ
 
 const router = express.Router();
 
-// Create payment intent for a bill
+// Get shop credit balance
+router.get('/credit/balance', authenticateToken, requireRole(['owner']), async (req, res) => {
+  try {
+    const shopResult = await pool.query(
+      'SELECT id, credit_balance, payment_status FROM shops WHERE owner_id = $1',
+      [req.user.userId]
+    );
+
+    if (shopResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Shop not found' });
+    }
+
+    const shop = shopResult.rows[0];
+
+    // Get recent transactions
+    const transactionsResult = await pool.query(
+      `SELECT * FROM credit_transactions
+       WHERE shop_id = $1
+       ORDER BY created_at DESC
+       LIMIT 10`,
+      [shop.id]
+    );
+
+    res.json({
+      credit_balance: shop.credit_balance,
+      payment_status: shop.payment_status,
+      transactions: transactionsResult.rows,
+      pricing: {
+        upload_cost: 3.00,
+        screen_32_monthly: 15.00,
+        screen_43_monthly: 20.00,
+        screen_55_monthly: 25.00
+      }
+    });
+  } catch (error) {
+    console.error('Get credit balance error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Top up credit balance
+router.post('/credit/topup', authenticateToken, requireRole(['owner']), async (req, res) => {
+  try {
+    const { amount } = req.body;
+
+    if (!amount || amount < 5) {
+      return res.status(400).json({ error: 'Minimum top-up is £5' });
+    }
+
+    if (amount > 500) {
+      return res.status(400).json({ error: 'Maximum top-up is £500' });
+    }
+
+    // Get shop details
+    const shopResult = await pool.query(
+      `SELECT s.*, u.email
+       FROM shops s
+       JOIN users u ON s.owner_id = u.id
+       WHERE s.owner_id = $1`,
+      [req.user.userId]
+    );
+
+    if (shopResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Shop not found' });
+    }
+
+    const shop = shopResult.rows[0];
+
+    // Create Stripe payment intent for credit top-up
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100), // Convert to pence
+      currency: 'gbp',
+      metadata: {
+        shop_id: shop.id,
+        type: 'credit_topup',
+        shop_name: shop.name
+      },
+      description: `Credit top-up for ${shop.name}`,
+      receipt_email: shop.email,
+      automatic_payment_methods: {
+        enabled: true,
+      },
+    });
+
+    res.json({
+      clientSecret: paymentIntent.client_secret,
+      amount: amount
+    });
+  } catch (error) {
+    console.error('Create top-up error:', error);
+    res.status(500).json({ error: 'Failed to create top-up' });
+  }
+});
+
+// Confirm credit top-up
+router.post('/credit/confirm', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { payment_intent_id, amount } = req.body;
+
+    // Verify payment with Stripe
+    const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
+
+    if (paymentIntent.status !== 'succeeded') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Payment not successful' });
+    }
+
+    // Get shop
+    const shopResult = await client.query(
+      'SELECT * FROM shops WHERE owner_id = $1 FOR UPDATE',
+      [req.user.userId]
+    );
+
+    if (shopResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Shop not found' });
+    }
+
+    const shop = shopResult.rows[0];
+    const currentBalance = parseFloat(shop.credit_balance);
+    const newBalance = currentBalance + parseFloat(amount);
+
+    // Update credit balance
+    await client.query(
+      'UPDATE shops SET credit_balance = $1 WHERE id = $2',
+      [newBalance, shop.id]
+    );
+
+    // Record transaction
+    await client.query(
+      `INSERT INTO credit_transactions
+       (shop_id, amount, type, description, balance_before, balance_after)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        shop.id,
+        amount,
+        'top_up',
+        `Credit top-up via Stripe`,
+        currentBalance,
+        newBalance
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      message: 'Credit added successfully',
+      new_balance: newBalance,
+      added: amount
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Confirm top-up error:', error);
+    res.status(500).json({ error: 'Failed to confirm top-up' });
+  } finally {
+    client.release();
+  }
+});
+
+// Create payment intent for a bill (for monthly subscriptions)
 router.post('/create-intent', authenticateToken, async (req, res) => {
   try {
     const { billId } = req.body;
@@ -75,7 +237,7 @@ router.post('/create-intent', authenticateToken, async (req, res) => {
   }
 });
 
-// Confirm payment (called after successful payment)
+// Confirm bill payment and check for shop reactivation
 router.post('/confirm', authenticateToken, async (req, res) => {
   try {
     const { billId, paymentIntentId } = req.body;
@@ -117,6 +279,29 @@ router.post('/confirm', authenticateToken, async (req, res) => {
 
     if (shopResult.rows.length > 0) {
       const shop = shopResult.rows[0];
+
+      // Check if shop needs reactivation
+      const shopStatusResult = await pool.query(
+        'SELECT payment_status FROM shops WHERE id = $1',
+        [bill.shop_id]
+      );
+
+      if (shopStatusResult.rows.length > 0 && shopStatusResult.rows[0].payment_status === 'inactive') {
+        // Check if all bills are paid
+        const unpaidBillsResult = await pool.query(
+          `SELECT COUNT(*) as unpaid_count FROM bills
+           WHERE shop_id = $1 AND status = 'pending'`,
+          [bill.shop_id]
+        );
+
+        if (parseInt(unpaidBillsResult.rows[0].unpaid_count) === 0) {
+          // Reactivate shop
+          await pool.query(
+            `UPDATE shops SET payment_status = 'active' WHERE id = $1`,
+            [bill.shop_id]
+          );
+        }
+      }
 
       // Send payment confirmation email
       await emailService.sendPaymentConfirmation(
