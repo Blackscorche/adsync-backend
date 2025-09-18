@@ -32,6 +32,41 @@ router.get('/my-shops', authenticateToken, requireRole(['design']), async (req, 
   }
 });
 
+// Get content for a specific shop (for designers to add to playlists)
+router.get('/shop/:shopId/content', authenticateToken, requireRole(['design']), async (req, res) => {
+  try {
+    const { shopId } = req.params;
+
+    // Verify designer is assigned to this shop
+    const shopCheck = await pool.query(
+      'SELECT id FROM shops WHERE id = $1 AND designer_id = $2',
+      [shopId, req.user.userId]
+    );
+
+    if (shopCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Access denied to this shop' });
+    }
+
+    // Get approved/published content for the shop
+    const result = await pool.query(
+      `SELECT
+        c.*,
+        u.full_name as uploaded_by_name
+       FROM content c
+       LEFT JOIN users u ON c.uploaded_by = u.id
+       WHERE c.shop_id = $1
+       AND c.status IN ('approved', 'published')
+       ORDER BY c.created_at DESC`,
+      [shopId]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching shop content:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.get('/assigned-shops', authenticateToken, requireRole(['design']), async (req, res) => {
   try {
     const result = await pool.query(

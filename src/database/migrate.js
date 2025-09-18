@@ -367,19 +367,49 @@ const migrations = [
       await client.query('DROP INDEX IF EXISTS idx_billing_shop');
       await client.query('DROP INDEX IF EXISTS idx_billing_status');
     }
+  },
+
+  {
+    version: 6,
+    name: 'fix_playlist_system',
+    up: async (client) => {
+      // Fix playlist table - add missing created_by column
+      await client.query(`
+        ALTER TABLE playlists
+        ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id)
+      `);
+
+      // Fix playlist_items column names to match backend code
+      await client.query(`
+        ALTER TABLE playlist_items
+        RENAME COLUMN order_index TO position
+      `);
+
+      await client.query(`
+        ALTER TABLE playlist_items
+        RENAME COLUMN duration_seconds TO duration
+      `);
+
+      // Add published status to playlists
+      await client.query(`
+        ALTER TABLE playlists
+        ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'draft'
+      `);
+
+      // Update existing playlists to have correct status
+      await client.query(`
+        UPDATE playlists SET status = 'published' WHERE is_active = true
+      `);
+    },
+    down: async (client) => {
+      await client.query('ALTER TABLE playlists DROP COLUMN IF EXISTS created_by');
+      await client.query('ALTER TABLE playlists DROP COLUMN IF EXISTS status');
+      await client.query('ALTER TABLE playlist_items RENAME COLUMN position TO order_index');
+      await client.query('ALTER TABLE playlist_items RENAME COLUMN duration TO duration_seconds');
+    }
   }
 
   // ADD NEW MIGRATIONS HERE
-  // {
-  //   version: 6,
-  //   name: 'your_new_feature',
-  //   up: async (client) => {
-  //     // Changes to apply
-  //   },
-  //   down: async (client) => {
-  //     // How to undo changes
-  //   }
-  // }
 ];
 
 async function runMigrations() {

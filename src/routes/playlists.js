@@ -208,23 +208,23 @@ router.put('/:id', authenticateToken, requireRole(['design', 'admin']), async (r
   }
 });
 
-// Add content to playlist
-router.post('/:id/items', authenticateToken, requireRole(['owner', 'admin']), async (req, res) => {
+// Add content to playlist - DESIGNERS manage playlists
+router.post('/:id/items', authenticateToken, requireRole(['design', 'admin']), async (req, res) => {
   try {
     const { id } = req.params;
     const { content_id, duration = 10 } = req.body;
 
-    // Check playlist ownership
-    if (req.user.role === 'owner') {
+    // Check if designer is assigned to the shop
+    if (req.user.role === 'design') {
       const checkResult = await pool.query(
         `SELECT p.* FROM playlists p
          JOIN shops s ON p.shop_id = s.id
-         WHERE p.id = $1 AND s.owner_id = $2`,
+         WHERE p.id = $1 AND s.designer_id = $2`,
         [id, req.user.userId]
       );
-      
+
       if (checkResult.rows.length === 0) {
-        return res.status(403).json({ error: 'Access denied' });
+        return res.status(403).json({ error: 'Access denied - not assigned to this shop' });
       }
     }
 
@@ -434,6 +434,98 @@ router.post('/assign', authenticateToken, requireRole(['owner', 'admin']), async
     });
   } catch (error) {
     console.error('Error assigning playlist:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Publish playlist - DESIGNERS can publish their playlists
+router.post('/:id/publish', authenticateToken, requireRole(['design', 'admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if designer is assigned to the shop
+    if (req.user.role === 'design') {
+      const checkResult = await pool.query(
+        `SELECT p.* FROM playlists p
+         JOIN shops s ON p.shop_id = s.id
+         WHERE p.id = $1 AND s.designer_id = $2`,
+        [id, req.user.userId]
+      );
+
+      if (checkResult.rows.length === 0) {
+        return res.status(403).json({ error: 'Access denied - not assigned to this shop' });
+      }
+    }
+
+    // Check if playlist has content
+    const itemsCheck = await pool.query(
+      'SELECT COUNT(*) as count FROM playlist_items WHERE playlist_id = $1',
+      [id]
+    );
+
+    if (parseInt(itemsCheck.rows[0].count) === 0) {
+      return res.status(400).json({ error: 'Cannot publish empty playlist' });
+    }
+
+    // Update playlist status to published
+    const result = await pool.query(
+      `UPDATE playlists
+       SET status = 'published', is_active = true, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Playlist not found' });
+    }
+
+    res.json({
+      message: 'Playlist published successfully',
+      playlist: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error publishing playlist:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get playlists for owner to view and assign
+router.get('/owner/:shopId', authenticateToken, requireRole(['owner']), async (req, res) => {
+  try {
+    const { shopId } = req.params;
+
+    // Verify owner owns this shop
+    const shopCheck = await pool.query(
+      'SELECT id FROM shops WHERE id = $1 AND owner_id = $2',
+      [shopId, req.user.userId]
+    );
+
+    if (shopCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Get published playlists for the shop
+    const result = await pool.query(
+      `SELECT
+        p.*,
+        u.full_name as created_by_name,
+        COUNT(DISTINCT pi.id) as item_count,
+        SUM(pi.duration) as total_duration,
+        STRING_AGG(DISTINCT sp.screen_id::text, ',') as assigned_screens
+       FROM playlists p
+       LEFT JOIN users u ON p.created_by = u.id
+       LEFT JOIN playlist_items pi ON p.id = pi.playlist_id
+       LEFT JOIN screen_playlists sp ON p.id = sp.playlist_id
+       WHERE p.shop_id = $1 AND p.status = 'published'
+       GROUP BY p.id, u.full_name
+       ORDER BY p.updated_at DESC`,
+      [shopId]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching owner playlists:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
