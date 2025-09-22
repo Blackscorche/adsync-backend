@@ -520,6 +520,85 @@ const migrations = [
     }
   }
 
+  ,
+  // Migration 9: Fix foreign key constraints
+  {
+    version: 9,
+    name: 'Fix foreign key constraints',
+    up: async (client) => {
+      // Fix foreign key constraint for content table - allow NULL on user delete
+      await client.query(`
+        ALTER TABLE content
+        DROP CONSTRAINT IF EXISTS content_uploaded_by_fkey
+      `);
+
+      await client.query(`
+        ALTER TABLE content
+        ADD CONSTRAINT content_uploaded_by_fkey
+        FOREIGN KEY (uploaded_by)
+        REFERENCES users(id)
+        ON DELETE SET NULL
+      `);
+
+      // Fix similar constraints for other user references in content
+      await client.query(`
+        ALTER TABLE content
+        DROP CONSTRAINT IF EXISTS content_designed_by_fkey
+      `);
+
+      await client.query(`
+        ALTER TABLE content
+        ADD CONSTRAINT content_designed_by_fkey
+        FOREIGN KEY (designed_by)
+        REFERENCES users(id)
+        ON DELETE SET NULL
+      `);
+
+      await client.query(`
+        ALTER TABLE content
+        DROP CONSTRAINT IF EXISTS content_reviewed_by_fkey
+      `);
+
+      await client.query(`
+        ALTER TABLE content
+        ADD CONSTRAINT content_reviewed_by_fkey
+        FOREIGN KEY (reviewed_by)
+        REFERENCES users(id)
+        ON DELETE SET NULL
+      `);
+
+      await client.query(`
+        ALTER TABLE content
+        DROP CONSTRAINT IF EXISTS content_published_by_fkey
+      `);
+
+      await client.query(`
+        ALTER TABLE content
+        ADD CONSTRAINT content_published_by_fkey
+        FOREIGN KEY (published_by)
+        REFERENCES users(id)
+        ON DELETE SET NULL
+      `);
+
+      // Fix sales_commissions foreign key to cascade on shop delete
+      await client.query(`
+        ALTER TABLE sales_commissions
+        DROP CONSTRAINT IF EXISTS sales_commissions_shop_id_fkey
+      `);
+
+      await client.query(`
+        ALTER TABLE sales_commissions
+        ADD CONSTRAINT sales_commissions_shop_id_fkey
+        FOREIGN KEY (shop_id)
+        REFERENCES shops(id)
+        ON DELETE CASCADE
+      `);
+    },
+    down: async (client) => {
+      // Restore original constraints
+    }
+  }
+
   // ADD NEW MIGRATIONS HERE
 ];
 

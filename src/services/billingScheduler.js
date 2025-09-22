@@ -73,7 +73,7 @@ class BillingScheduler {
 
           // Create bill with both screen and content charges
           await client.query(`
-            INSERT INTO bills (
+            INSERT INTO billing (
               shop_id, invoice_number, billing_period_start, billing_period_end,
               screen_charges, content_charges, subtotal, vat_amount, total_amount,
               status, payment_due_date, created_at, description
@@ -95,13 +95,13 @@ class BillingScheduler {
           if (!deductResult.rows[0].success) {
             // Mark as unpaid if insufficient credit
             await client.query(
-              'UPDATE bills SET status = $1 WHERE invoice_number = $2',
+              'UPDATE billing SET status = $1 WHERE invoice_number = $2',
               ['unpaid', invoiceNumber]
             );
           } else {
             // Mark as paid if successfully deducted
             await client.query(
-              'UPDATE bills SET status = $1, paid_at = NOW() WHERE invoice_number = $2',
+              'UPDATE billing SET status = $1, paid_at = NOW() WHERE invoice_number = $2',
               ['paid', invoiceNumber]
             );
 
@@ -176,7 +176,7 @@ class BillingScheduler {
         SELECT b.*, s.id as shop_id, s.name as shop_name,
                u.email, u.full_name,
                DATE_PART('day', NOW() - b.payment_due_date) as days_overdue
-        FROM bills b
+        FROM billing b
         JOIN shops s ON b.shop_id = s.id
         JOIN users u ON s.owner_id = u.id
         WHERE b.status = 'pending'
@@ -194,7 +194,7 @@ class BillingScheduler {
 
           // Update bill status
           await client.query(
-            `UPDATE bills SET status = 'overdue', days_overdue = $1 WHERE id = $2`,
+            `UPDATE billing SET status = 'overdue', days_overdue = $1 WHERE id = $2`,
             [bill.days_overdue, bill.id]
           );
 

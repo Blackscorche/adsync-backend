@@ -589,6 +589,8 @@ router.put('/users/:id', authenticateToken, requireRole(['admin']), async (req, 
 
 // Delete user
 router.delete('/users/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const { id } = req.params;
 
@@ -597,22 +599,47 @@ router.delete('/users/:id', authenticateToken, requireRole(['admin']), async (re
       return res.status(400).json({ error: 'Cannot delete your own account' });
     }
 
-    const result = await pool.query(
+    await client.query('BEGIN');
+
+    // Check if user owns any shops
+    const shopsResult = await client.query(
+      'SELECT COUNT(*) as count FROM shops WHERE owner_id = $1',
+      [id]
+    );
+
+    if (parseInt(shopsResult.rows[0].count) > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'User owns shops and cannot be deleted.',
+        shops_count: parseInt(shopsResult.rows[0].count)
+      });
+    }
+
+    // Note: Other relationships (designer_id, registered_by, etc.) will be SET NULL automatically
+
+    // Delete user (foreign key constraints will handle related data)
+    const result = await client.query(
       'DELETE FROM users WHERE id = $1 RETURNING email',
       [id]
     );
 
     if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'User not found' });
     }
+
+    await client.query('COMMIT');
 
     res.json({
       message: 'User deleted successfully',
       email: result.rows[0].email
     });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error deleting user:', error);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 

@@ -39,7 +39,7 @@ router.get('/shops/:shopId', authenticateToken, async (req, res) => {
 
     // Get billing history
     const billsResult = await pool.query(
-      `SELECT * FROM bills
+      `SELECT * FROM billing
        WHERE shop_id = $1
        ORDER BY created_at DESC
        LIMIT 12`,
@@ -156,7 +156,7 @@ router.post('/shops/:shopId/generate-invoice', authenticateToken, requireRole(['
 
     // Check if invoice already exists
     const existingBill = await pool.query(
-      `SELECT id FROM bills
+      `SELECT id FROM billing
        WHERE shop_id = $1
        AND EXTRACT(MONTH FROM billing_period_start) = $2
        AND EXTRACT(YEAR FROM billing_period_start) = $3`,
@@ -171,7 +171,7 @@ router.post('/shops/:shopId/generate-invoice', authenticateToken, requireRole(['
     const invoiceNumber = `INV-${shop.id}-${year}${String(month).padStart(2, '0')}`;
 
     const billResult = await pool.query(
-      `INSERT INTO bills (
+      `INSERT INTO billing (
         shop_id, invoice_number, billing_period_start, billing_period_end,
         screen_charges, content_charges, additional_charges, subtotal,
         vat_amount, total_amount, status, payment_due_date
@@ -209,7 +209,7 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
     const billResult = await pool.query(
       `SELECT b.*, s.name as shop_name, s.address, s.city, s.postcode,
               u.full_name as owner_name, u.email as owner_email
-       FROM bills b
+       FROM billing b
        JOIN shops s ON b.shop_id = s.id
        JOIN users u ON s.owner_id = u.id
        WHERE b.id = $1`,
@@ -325,7 +325,7 @@ router.patch('/bills/:billId/payment', authenticateToken, requireRole(['admin'])
     const { status, payment_method, payment_reference, payment_date } = req.body;
 
     const result = await pool.query(
-      `UPDATE bills
+      `UPDATE billing
        SET status = $1,
            payment_method = $2,
            payment_reference = $3,
@@ -361,7 +361,7 @@ router.get('/unpaid', authenticateToken, requireRole(['admin']), async (req, res
   try {
     const result = await pool.query(
       `SELECT b.*, s.name as shop_name, u.full_name as owner_name
-       FROM bills b
+       FROM billing b
        JOIN shops s ON b.shop_id = s.id
        JOIN users u ON s.owner_id = u.id
        WHERE b.status = 'pending'

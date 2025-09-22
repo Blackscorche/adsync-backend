@@ -180,7 +180,7 @@ router.post('/create-intent', authenticateToken, async (req, res) => {
     // Get bill details with user email
     const billResult = await pool.query(
       `SELECT b.*, s.name as shop_name, s.owner_id, u.email as owner_email
-       FROM bills b
+       FROM billing b
        JOIN shops s ON b.shop_id = s.id
        JOIN users u ON s.owner_id = u.id
        WHERE b.id = $1 AND b.status = 'pending'`,
@@ -219,7 +219,7 @@ router.post('/create-intent', authenticateToken, async (req, res) => {
 
     // Store payment intent ID in database
     await pool.query(
-      `UPDATE bills
+      `UPDATE billing
        SET payment_intent_id = $1, updated_at = NOW()
        WHERE id = $2`,
       [paymentIntent.id, billId]
@@ -251,7 +251,7 @@ router.post('/confirm', authenticateToken, async (req, res) => {
 
     // Update bill status
     const result = await pool.query(
-      `UPDATE bills
+      `UPDATE billing
        SET status = 'paid',
            payment_method = 'card',
            payment_reference = $1,
@@ -289,7 +289,7 @@ router.post('/confirm', authenticateToken, async (req, res) => {
       if (shopStatusResult.rows.length > 0 && shopStatusResult.rows[0].payment_status === 'inactive') {
         // Check if all bills are paid
         const unpaidBillsResult = await pool.query(
-          `SELECT COUNT(*) as unpaid_count FROM bills
+          `SELECT COUNT(*) as unpaid_count FROM billing
            WHERE shop_id = $1 AND status = 'pending'`,
           [bill.shop_id]
         );
@@ -368,7 +368,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 
       // Update bill status
       await pool.query(
-        `UPDATE bills
+        `UPDATE billing
          SET status = 'paid',
              payment_method = 'card',
              payment_reference = $1,
@@ -381,7 +381,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       // Create notification for admin
       const billResult = await pool.query(
         `SELECT b.*, s.name as shop_name
-         FROM bills b
+         FROM billing b
          JOIN shops s ON b.shop_id = s.id
          WHERE payment_intent_id = $1`,
         [paymentIntent.id]
@@ -480,7 +480,7 @@ router.get('/history/:shopId', authenticateToken, async (req, res) => {
     const result = await pool.query(
       `SELECT b.*,
               CASE WHEN b.payment_intent_id IS NOT NULL THEN 'online' ELSE 'manual' END as payment_type
-       FROM bills b
+       FROM billing b
        WHERE b.shop_id = $1 AND b.status = 'paid'
        ORDER BY b.payment_date DESC
        LIMIT 50`,

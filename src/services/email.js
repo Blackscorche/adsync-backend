@@ -134,7 +134,7 @@ class EmailService {
     try {
       const result = await pool.query(
         `SELECT b.*, s.name as shop_name, u.email, u.full_name
-         FROM bills b
+         FROM billing b
          JOIN shops s ON b.shop_id = s.id
          JOIN users u ON s.owner_id = u.id
          WHERE b.id = $1`,
@@ -182,7 +182,7 @@ class EmailService {
     try {
       const result = await pool.query(
         `SELECT b.*, s.name as shop_name, u.email, u.full_name
-         FROM bills b
+         FROM billing b
          JOIN shops s ON b.shop_id = s.id
          JOIN users u ON s.owner_id = u.id
          WHERE b.id = $1`,
