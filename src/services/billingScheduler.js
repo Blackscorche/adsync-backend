@@ -37,32 +37,68 @@ class BillingScheduler {
       const billingEnd = new Date(today.getFullYear(), today.getMonth(), 0);
 
       for (const shop of shopsResult.rows) {
-        // Calculate screen subscription charges only (not content - that's prepaid now)
-        const screenCharges =
-          (shop.screen_32_count || 0) * (shop.screen_32_price || 15) +
-          (shop.screen_43_count || 0) * (shop.screen_43_price || 20) +
-          (shop.screen_55_count || 0) * (shop.screen_55_price || 25);
+        // Calculate screen subscription charges
+        const screensResult = await client.query(`
+          SELECT COUNT(*) as count, SUM(monthly_cost) as total_cost
+          FROM screens
+          WHERE shop_id = $1 AND status = 'active'
+        `, [shop.id]);
 
-        if (screenCharges > 0) {
-          const subtotal = screenCharges;
+        const screenCharges = parseFloat(screensResult.rows[0].total_cost || 0);
+
+        // Calculate content storage/display charges (£1 per active content per month)
+        const contentResult = await client.query(`
+          SELECT COUNT(*) as count
+          FROM content
+          WHERE shop_id = $1 AND status IN ('approved', 'published')
+        `, [shop.id]);
+
+        const contentCount = parseInt(contentResult.rows[0].count || 0);
+        const contentCharges = contentCount * 1.00; // £1 per content item per month
+
+        const totalCharges = screenCharges + contentCharges;
+
+        if (totalCharges > 0) {
+          const subtotal = totalCharges;
           const vat = subtotal * 0.20;
           const total = subtotal + vat;
 
           const invoiceNumber = `INV-${shop.id}-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}`;
 
-          // Create bill
+          // Create bill with both screen and content charges
           await client.query(`
             INSERT INTO bills (
               shop_id, invoice_number, billing_period_start, billing_period_end,
               screen_charges, content_charges, subtotal, vat_amount, total_amount,
-              status, payment_due_date, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+              status, payment_due_date, created_at, description
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), $12)
           `, [
             shop.id, invoiceNumber, billingStart, billingEnd,
-            screenCharges, 0, subtotal, vat, total,
+            screenCharges, contentCharges, subtotal, vat, total,
             'pending',
-            new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days to pay
+            new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days to pay
+            `Screens: ${screensResult.rows[0].count || 0}, Content items: ${contentCount}`
           ]);
+
+          // Deduct from credit balance immediately
+          const deductResult = await client.query(
+            'SELECT deduct_credit($1, $2, $3, $4) as success',
+            [shop.id, total, 'monthly_billing', `Monthly charges - ${invoiceNumber}`]
+          );
+
+          if (!deductResult.rows[0].success) {
+            // Mark as unpaid if insufficient credit
+            await client.query(
+              'UPDATE bills SET status = $1 WHERE invoice_number = $2',
+              ['unpaid', invoiceNumber]
+            );
+          } else {
+            // Mark as paid if successfully deducted
+            await client.query(
+              'UPDATE bills SET status = $1, paid_at = NOW() WHERE invoice_number = $2',
+              ['paid', invoiceNumber]
+            );
+          }
 
           // Send invoice email
           await emailService.sendInvoice(
@@ -74,8 +110,15 @@ class BillingScheduler {
         }
       }
 
+      // Reset free upload for all shops for the new month
+      await client.query(`
+        UPDATE shops
+        SET free_upload_used = false
+        WHERE approval_status = 'approved'
+      `);
+
       await client.query('COMMIT');
-      console.log(`Generated invoices for ${shopsResult.rows.length} shops`);
+      console.log(`Generated invoices for ${shopsResult.rows.length} shops and reset free uploads`);
 
     } catch (error) {
       await client.query('ROLLBACK');

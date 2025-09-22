@@ -81,9 +81,9 @@ router.post('/', authenticateToken, async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Check shop payment status
+    // Check shop payment status and credit balance
     const shopResult = await client.query(
-      'SELECT payment_status FROM shops WHERE id = $1 FOR UPDATE',
+      'SELECT payment_status, credit_balance FROM shops WHERE id = $1 FOR UPDATE',
       [shopId]
     );
 
@@ -92,11 +92,13 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Shop not found' });
     }
 
-    if (shopResult.rows[0].payment_status !== 'active') {
+    const shop = shopResult.rows[0];
+
+    if (shop.payment_status !== 'active') {
       await client.query('ROLLBACK');
       return res.status(403).json({
         error: 'Shop is inactive. Please pay outstanding bills to add screens.',
-        payment_status: shopResult.rows[0].payment_status
+        payment_status: shop.payment_status
       });
     }
 
@@ -120,6 +122,32 @@ router.post('/', authenticateToken, async (req, res) => {
     };
     const monthlyCost = monthlyCosts[size] || 15.00;
 
+    // Check if shop has enough credit for the screen
+    if (parseFloat(shop.credit_balance) < monthlyCost) {
+      await client.query('ROLLBACK');
+      return res.status(402).json({
+        error: `Insufficient credit. Screen costs £${monthlyCost.toFixed(2)}/month. Please top up.`,
+        required_amount: monthlyCost,
+        current_balance: parseFloat(shop.credit_balance)
+      });
+    }
+
+    // Deduct the first month's cost immediately
+    const deductResult = await client.query(
+      'SELECT deduct_credit($1, $2, $3, $4) as success',
+      [shopId, monthlyCost, 'screen_subscription', `New ${size} screen - ${name}`]
+    );
+
+    if (!deductResult.rows[0].success) {
+      await client.query('ROLLBACK');
+      return res.status(402).json({
+        error: 'Failed to deduct credit. Please try again.',
+        required_amount: monthlyCost,
+        current_balance: parseFloat(shop.credit_balance)
+      });
+    }
+
+    // Create the screen
     const result = await client.query(
       `INSERT INTO screens (shop_id, name, location, device_id, size, monthly_cost, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'active')
@@ -131,7 +159,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     res.status(201).json({
       ...result.rows[0],
-      message: `Screen added. Monthly subscription: £${monthlyCost.toFixed(2)}`
+      message: `Screen added and £${monthlyCost.toFixed(2)} charged. Monthly subscription: £${monthlyCost.toFixed(2)}`
     });
   } catch (error) {
     await client.query('ROLLBACK');

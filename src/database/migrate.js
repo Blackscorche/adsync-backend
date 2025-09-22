@@ -198,10 +198,10 @@ const migrations = [
         $$ LANGUAGE plpgsql;
       `);
 
-      // Add courtesy credit to existing shops
-      await client.query(`
-        UPDATE shops SET credit_balance = 10.00 WHERE credit_balance = 0
-      `);
+      // No courtesy credit for shops - they must pay upfront
+      // await client.query(`
+      //   UPDATE shops SET credit_balance = 10.00 WHERE credit_balance = 0
+      // `);
     },
     down: async (client) => {
       await client.query('DROP FUNCTION IF EXISTS deduct_credit');
@@ -379,16 +379,31 @@ const migrations = [
         ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id)
       `);
 
-      // Fix playlist_items column names to match backend code
-      await client.query(`
-        ALTER TABLE playlist_items
-        RENAME COLUMN order_index TO position
+      // Check if order_index column exists before renaming
+      const orderIndexExists = await client.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'playlist_items' AND column_name = 'order_index'
       `);
 
-      await client.query(`
-        ALTER TABLE playlist_items
-        RENAME COLUMN duration_seconds TO duration
+      if (orderIndexExists.rows.length > 0) {
+        await client.query(`
+          ALTER TABLE playlist_items
+          RENAME COLUMN order_index TO position
+        `);
+      }
+
+      // Check if duration_seconds column exists before renaming
+      const durationSecondsExists = await client.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'playlist_items' AND column_name = 'duration_seconds'
       `);
+
+      if (durationSecondsExists.rows.length > 0) {
+        await client.query(`
+          ALTER TABLE playlist_items
+          RENAME COLUMN duration_seconds TO duration
+        `);
+      }
 
       // Add published status to playlists
       await client.query(`
@@ -404,8 +419,25 @@ const migrations = [
     down: async (client) => {
       await client.query('ALTER TABLE playlists DROP COLUMN IF EXISTS created_by');
       await client.query('ALTER TABLE playlists DROP COLUMN IF EXISTS status');
-      await client.query('ALTER TABLE playlist_items RENAME COLUMN position TO order_index');
-      await client.query('ALTER TABLE playlist_items RENAME COLUMN duration TO duration_seconds');
+
+      // Check before renaming back
+      const positionExists = await client.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'playlist_items' AND column_name = 'position'
+      `);
+
+      if (positionExists.rows.length > 0) {
+        await client.query('ALTER TABLE playlist_items RENAME COLUMN position TO order_index');
+      }
+
+      const durationExists = await client.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'playlist_items' AND column_name = 'duration'
+      `);
+
+      if (durationExists.rows.length > 0) {
+        await client.query('ALTER TABLE playlist_items RENAME COLUMN duration TO duration_seconds');
+      }
     }
   }
 
