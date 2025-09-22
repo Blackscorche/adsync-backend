@@ -46,7 +46,13 @@ class BillingScheduler {
 
         const screenCharges = parseFloat(screensResult.rows[0].total_cost || 0);
 
-        // Calculate content storage/display charges (£1 per active content per month)
+        // Get content monthly price from settings
+        const contentPriceSettings = await client.query(
+          "SELECT setting_value FROM system_settings WHERE setting_key = 'content_monthly_price'"
+        );
+        const contentMonthlyPrice = parseFloat(contentPriceSettings.rows[0]?.setting_value || 1.00);
+
+        // Calculate content storage/display charges
         const contentResult = await client.query(`
           SELECT COUNT(*) as count
           FROM content
@@ -54,7 +60,7 @@ class BillingScheduler {
         `, [shop.id]);
 
         const contentCount = parseInt(contentResult.rows[0].count || 0);
-        const contentCharges = contentCount * 1.00; // £1 per content item per month
+        const contentCharges = contentCount * contentMonthlyPrice;
 
         const totalCharges = screenCharges + contentCharges;
 
@@ -98,6 +104,36 @@ class BillingScheduler {
               'UPDATE bills SET status = $1, paid_at = NOW() WHERE invoice_number = $2',
               ['paid', invoiceNumber]
             );
+
+            // Get commission percentage from settings
+            const commissionSettings = await client.query(
+              "SELECT setting_value FROM system_settings WHERE setting_key = 'commission_percentage'"
+            );
+            const commissionPercentage = parseFloat(commissionSettings.rows[0]?.setting_value || 10) / 100;
+
+            // Calculate sales commission
+            if (shop.registered_by) {
+              const commissionAmount = total * commissionPercentage;
+
+              // Create or update monthly commission for sales person
+              await client.query(`
+                INSERT INTO sales_commissions (
+                  sales_user_id, shop_id, commission_type, amount,
+                  percentage, status, month, description
+                )
+                VALUES ($1, $2, 'monthly', $3, $4, 'approved', DATE_TRUNC('month', CURRENT_DATE), $5)
+                ON CONFLICT (sales_user_id, shop_id, month, commission_type)
+                DO UPDATE SET
+                  amount = sales_commissions.amount + EXCLUDED.amount,
+                  updated_at = NOW()
+              `, [
+                shop.registered_by,
+                shop.id,
+                commissionAmount,
+                commissionPercentage * 100,
+                `${commissionPercentage * 100}% of ${invoiceNumber} (£${total.toFixed(2)})`
+              ]);
+            }
           }
 
           // Send invoice email

@@ -143,7 +143,11 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
       });
     }
 
-    const UPLOAD_COST = 3.00;
+    // Get content upload price from settings
+    const uploadPriceSettings = await client.query(
+      "SELECT setting_value FROM system_settings WHERE setting_key = 'content_upload_price'"
+    );
+    const UPLOAD_COST = parseFloat(uploadPriceSettings.rows[0]?.setting_value || 3.00);
     let chargeAmount = 0;
     let wasFreeUpload = false;
 
@@ -174,7 +178,7 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
           error: 'Insufficient credit balance. Please top up to continue.',
           required_amount: UPLOAD_COST,
           current_balance: parseFloat(shop.credit_balance),
-          message: 'You need at least £3.00 credit to upload additional content'
+          message: `You need at least £${UPLOAD_COST.toFixed(2)} credit to upload additional content`
         });
       }
 
@@ -194,6 +198,36 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
       }
 
       chargeAmount = UPLOAD_COST;
+
+      // Get commission percentage from settings
+      const commissionSettings = await client.query(
+        "SELECT setting_value FROM system_settings WHERE setting_key = 'commission_percentage'"
+      );
+      const commissionPercentage = parseFloat(commissionSettings.rows[0]?.setting_value || 10) / 100;
+
+      // Calculate sales commission for paid uploads
+      const shopDetails = await client.query(
+        'SELECT registered_by FROM shops WHERE id = $1',
+        [shop.id]
+      );
+
+      if (shopDetails.rows[0]?.registered_by) {
+        const commissionAmount = UPLOAD_COST * commissionPercentage;
+
+        await client.query(`
+          INSERT INTO sales_commissions (
+            sales_user_id, shop_id, commission_type, amount,
+            percentage, status, month, description
+          )
+          VALUES ($1, $2, 'content', $3, $4, 'approved', DATE_TRUNC('month', CURRENT_DATE), $5)
+        `, [
+          shopDetails.rows[0].registered_by,
+          shop.id,
+          commissionAmount,
+          commissionPercentage * 100,
+          `${commissionPercentage * 100}% of content upload (£${UPLOAD_COST.toFixed(2)})`
+        ]);
+      }
     }
 
     // Determine file type

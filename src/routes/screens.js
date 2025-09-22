@@ -4,6 +4,23 @@ const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Get available screen types
+router.get('/types', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, size_inches, monthly_price
+      FROM screen_types
+      WHERE is_active = true
+      ORDER BY size_inches
+    `);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching screen types:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Get all screens for a shop
 router.get('/shop/:shopId', authenticateToken, async (req, res) => {
   try {
@@ -72,7 +89,7 @@ router.post('/', authenticateToken, async (req, res) => {
   const client = await pool.connect();
 
   try {
-    const { shopId, name, location, deviceId, size = '32_inch' } = req.body;
+    const { shopId, name, location, deviceId, screenTypeId } = req.body;
 
     // Check access
     if (req.user.role === 'owner' && req.user.shopId !== shopId) {
@@ -114,13 +131,24 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
-    // Determine monthly cost based on size
-    const monthlyCosts = {
-      '32_inch': 15.00,
-      '43_inch': 20.00,
-      '55_inch': 25.00
-    };
-    const monthlyCost = monthlyCosts[size] || 15.00;
+    // Get screen type and pricing
+    if (!screenTypeId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Screen type is required' });
+    }
+
+    const screenTypeResult = await client.query(
+      'SELECT * FROM screen_types WHERE id = $1 AND is_active = true',
+      [screenTypeId]
+    );
+
+    if (screenTypeResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Invalid screen type' });
+    }
+
+    const screenType = screenTypeResult.rows[0];
+    const monthlyCost = parseFloat(screenType.monthly_price);
 
     // Check if shop has enough credit for the screen
     if (parseFloat(shop.credit_balance) < monthlyCost) {
@@ -135,7 +163,7 @@ router.post('/', authenticateToken, async (req, res) => {
     // Deduct the first month's cost immediately
     const deductResult = await client.query(
       'SELECT deduct_credit($1, $2, $3, $4) as success',
-      [shopId, monthlyCost, 'screen_subscription', `New ${size} screen - ${name}`]
+      [shopId, monthlyCost, 'screen_subscription', `New ${screenType.name} screen - ${name}`]
     );
 
     if (!deductResult.rows[0].success) {
@@ -149,17 +177,48 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Create the screen
     const result = await client.query(
-      `INSERT INTO screens (shop_id, name, location, device_id, size, monthly_cost, status)
+      `INSERT INTO screens (shop_id, name, location, device_id, screen_type_id, monthly_cost, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'active')
        RETURNING *`,
-      [shopId, name, location, deviceId, size, monthlyCost]
+      [shopId, name, location, deviceId, screenTypeId, monthlyCost]
     );
+
+    // Get commission percentage from settings
+    const commissionSettings = await client.query(
+      "SELECT setting_value FROM system_settings WHERE setting_key = 'commission_percentage'"
+    );
+    const commissionPercentage = parseFloat(commissionSettings.rows[0]?.setting_value || 10) / 100;
+
+    // Calculate sales commission for this payment
+    const shopDetails = await client.query(
+      'SELECT registered_by FROM shops WHERE id = $1',
+      [shopId]
+    );
+
+    if (shopDetails.rows[0]?.registered_by) {
+      const commissionAmount = monthlyCost * commissionPercentage;
+
+      await client.query(`
+        INSERT INTO sales_commissions (
+          sales_user_id, shop_id, commission_type, amount,
+          percentage, status, month, description
+        )
+        VALUES ($1, $2, 'screen', $3, $4, 'approved', DATE_TRUNC('month', CURRENT_DATE), $5)
+      `, [
+        shopDetails.rows[0].registered_by,
+        shopId,
+        commissionAmount,
+        commissionPercentage * 100,
+        `${commissionPercentage * 100}% of new ${screenType.name} screen (£${monthlyCost.toFixed(2)})`
+      ]);
+    }
 
     await client.query('COMMIT');
 
     res.status(201).json({
       ...result.rows[0],
-      message: `Screen added and £${monthlyCost.toFixed(2)} charged. Monthly subscription: £${monthlyCost.toFixed(2)}`
+      message: `Screen added and £${monthlyCost.toFixed(2)} charged. Monthly subscription: £${monthlyCost.toFixed(2)}`,
+      screenType: screenType.name
     });
   } catch (error) {
     await client.query('ROLLBACK');

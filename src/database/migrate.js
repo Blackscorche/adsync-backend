@@ -439,6 +439,85 @@ const migrations = [
         await client.query('ALTER TABLE playlist_items RENAME COLUMN duration TO duration_seconds');
       }
     }
+  },
+
+  // Migration 8: Add configurable pricing settings and dynamic screen types
+  {
+    version: 8,
+    name: 'Add configurable pricing settings and dynamic screen types',
+    up: async (client) => {
+      // Create screen_types table for dynamic screen management
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS screen_types (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100) NOT NULL UNIQUE,
+          size_inches INTEGER NOT NULL,
+          monthly_price DECIMAL(10, 2) NOT NULL,
+          is_active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Insert default screen types
+      await client.query(`
+        INSERT INTO screen_types (name, size_inches, monthly_price)
+        VALUES
+          ('32 inch', 32, 15.00),
+          ('43 inch', 43, 20.00),
+          ('55 inch', 55, 25.00),
+          ('65 inch', 65, 35.00),
+          ('75 inch', 75, 45.00)
+        ON CONFLICT (name) DO NOTHING
+      `);
+
+      // Add description column to system_settings if it doesn't exist
+      await client.query(`
+        ALTER TABLE system_settings
+        ADD COLUMN IF NOT EXISTS description TEXT
+      `);
+
+      // Insert system settings for pricing
+      await client.query(`
+        INSERT INTO system_settings (setting_key, setting_value, description)
+        VALUES
+          ('commission_percentage', '10', 'Sales commission percentage'),
+          ('content_upload_price', '3.00', 'Price for content uploads after free monthly upload'),
+          ('content_monthly_price', '1.00', 'Monthly price per content item')
+        ON CONFLICT (setting_key) DO UPDATE
+        SET setting_value = EXCLUDED.setting_value,
+            description = EXCLUDED.description
+      `);
+
+      // Update screens table to reference screen_types
+      await client.query(`
+        ALTER TABLE screens
+        ADD COLUMN IF NOT EXISTS screen_type_id INTEGER REFERENCES screen_types(id)
+      `);
+
+      // Migrate existing screen data to use screen_types
+      await client.query(`
+        UPDATE screens s
+        SET screen_type_id = st.id
+        FROM screen_types st
+        WHERE
+          (s.size = '32_inch' AND st.name = '32 inch') OR
+          (s.size = '43_inch' AND st.name = '43 inch') OR
+          (s.size = '55_inch' AND st.name = '55 inch')
+      `);
+    },
+    down: async (client) => {
+      await client.query('ALTER TABLE screens DROP COLUMN IF EXISTS screen_type_id');
+      await client.query('DROP TABLE IF EXISTS screen_types');
+      await client.query(`
+        DELETE FROM system_settings
+        WHERE setting_key IN (
+          'commission_percentage',
+          'content_upload_price',
+          'content_monthly_price'
+        )
+      `);
+    }
   }
 
   // ADD NEW MIGRATIONS HERE

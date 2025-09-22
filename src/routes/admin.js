@@ -194,7 +194,6 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
           [shop.owner_id]
         );
 
-        // Create commission record for sales team
         const commissionSettings = await pool.query(
           "SELECT setting_value FROM system_settings WHERE setting_key = 'commission_percentage'"
         );
@@ -202,8 +201,8 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
 
         await pool.query(
           `INSERT INTO sales_commissions (sales_user_id, shop_id, commission_type, amount, percentage, status, month)
-           VALUES ($1, $2, 'registration', $3, $4, 'approved', DATE_TRUNC('month', CURRENT_DATE))`,
-          [shop.registered_by, shopId, 50 * commissionRate, commissionRate * 100]
+           VALUES ($1, $2, 'registration', 0, $3, 'pending', DATE_TRUNC('month', CURRENT_DATE))`,
+          [shop.registered_by, shopId, commissionRate * 100]
         );
 
         // Notify owner
@@ -323,61 +322,158 @@ router.post('/register-user', authenticateToken, requireRole(['admin']), async (
   }
 });
 
-// Update screen pricing
-router.get('/screen-sizes', authenticateToken, requireRole(['admin']), async (req, res) => {
+// Screen Types Management (Dynamic)
+router.get('/screen-types', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM screen_sizes ORDER BY size_inches'
+      'SELECT * FROM screen_types ORDER BY size_inches'
     );
     res.json(result.rows);
   } catch (error) {
-    console.error('Error fetching screen sizes:', error);
+    console.error('Error fetching screen types:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-router.post('/screen-sizes', authenticateToken, requireRole(['admin']), async (req, res) => {
+router.post('/screen-types', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
-    const { size_inches, monthly_fee } = req.body;
+    const { name, size_inches, monthly_price } = req.body;
 
     const result = await pool.query(
-      `INSERT INTO screen_sizes (size_inches, monthly_fee)
-       VALUES ($1, $2)
-       ON CONFLICT (size_inches)
-       DO UPDATE SET monthly_fee = $2
+      `INSERT INTO screen_types (name, size_inches, monthly_price)
+       VALUES ($1, $2, $3)
        RETURNING *`,
-      [size_inches, monthly_fee]
+      [name, size_inches, monthly_price]
     );
 
     res.json({
-      message: 'Screen size pricing updated',
-      screenSize: result.rows[0]
+      message: 'Screen type added',
+      screenType: result.rows[0]
     });
   } catch (error) {
-    console.error('Error updating screen size:', error);
+    console.error('Error adding screen type:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Get system settings
-router.get('/settings', authenticateToken, requireRole(['admin']), async (req, res) => {
+router.put('/screen-types/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM system_settings');
-    res.json(result.rows);
+    const { id } = req.params;
+    const { name, size_inches, monthly_price, is_active } = req.body;
+
+    const result = await pool.query(
+      `UPDATE screen_types
+       SET name = COALESCE($1, name),
+           size_inches = COALESCE($2, size_inches),
+           monthly_price = COALESCE($3, monthly_price),
+           is_active = COALESCE($4, is_active),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $5
+       RETURNING *`,
+      [name, size_inches, monthly_price, is_active, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Screen type not found' });
+    }
+
+    res.json({
+      message: 'Screen type updated',
+      screenType: result.rows[0]
+    });
   } catch (error) {
-    console.error('Error fetching settings:', error);
+    console.error('Error updating screen type:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Update system setting
-router.put('/settings/:key', authenticateToken, requireRole(['admin']), async (req, res) => {
+router.delete('/screen-types/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if any screens are using this type
+    const screensUsingType = await pool.query(
+      'SELECT COUNT(*) as count FROM screens WHERE screen_type_id = $1',
+      [id]
+    );
+
+    if (parseInt(screensUsingType.rows[0].count) > 0) {
+      return res.status(400).json({
+        error: 'Cannot delete screen type that is in use by screens',
+        screens_count: parseInt(screensUsingType.rows[0].count)
+      });
+    }
+
+    const result = await pool.query(
+      'DELETE FROM screen_types WHERE id = $1 RETURNING *',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Screen type not found' });
+    }
+
+    res.json({
+      message: 'Screen type deleted',
+      screenType: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error deleting screen type:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Pricing and System Settings Management
+router.get('/pricing-settings', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const settings = await pool.query(`
+      SELECT * FROM system_settings
+      WHERE setting_key IN (
+        'commission_percentage',
+        'content_upload_price',
+        'content_monthly_price'
+      )
+      ORDER BY setting_key
+    `);
+
+    const screenTypes = await pool.query(
+      'SELECT * FROM screen_types WHERE is_active = true ORDER BY size_inches'
+    );
+
+    res.json({
+      settings: settings.rows,
+      screenTypes: screenTypes.rows
+    });
+  } catch (error) {
+    console.error('Error fetching pricing settings:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update pricing setting
+router.put('/pricing-settings/:key', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const { key } = req.params;
     const { value } = req.body;
 
-    // First try to update
-    let result = await pool.query(
+    // Validate the key
+    const allowedKeys = [
+      'commission_percentage',
+      'content_upload_price',
+      'content_monthly_price'
+    ];
+
+    if (!allowedKeys.includes(key)) {
+      return res.status(400).json({ error: 'Invalid setting key' });
+    }
+
+    // Validate the value is a positive number
+    const numValue = parseFloat(value);
+    if (isNaN(numValue) || numValue < 0) {
+      return res.status(400).json({ error: 'Value must be a positive number' });
+    }
+
+    const result = await pool.query(
       `UPDATE system_settings
        SET setting_value = $1
        WHERE setting_key = $2
@@ -385,46 +481,26 @@ router.put('/settings/:key', authenticateToken, requireRole(['admin']), async (r
       [value, key]
     );
 
-    // If no rows updated, insert new setting
     if (result.rows.length === 0) {
-      result = await pool.query(
+      // Insert if doesn't exist
+      const insertResult = await pool.query(
         `INSERT INTO system_settings (setting_key, setting_value)
          VALUES ($1, $2)
          RETURNING *`,
         [key, value]
       );
+      res.json({
+        message: 'Setting created',
+        setting: insertResult.rows[0]
+      });
+    } else {
+      res.json({
+        message: 'Setting updated',
+        setting: result.rows[0]
+      });
     }
-
-    res.json({
-      message: 'Setting updated',
-      setting: result.rows[0]
-    });
   } catch (error) {
-    console.error('Error updating setting:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Delete screen size
-router.delete('/screen-sizes/:size', authenticateToken, requireRole(['admin']), async (req, res) => {
-  try {
-    const { size } = req.params;
-
-    const result = await pool.query(
-      'DELETE FROM screen_sizes WHERE size_inches = $1 RETURNING *',
-      [size]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Screen size not found' });
-    }
-
-    res.json({
-      message: 'Screen size deleted successfully',
-      screenSize: result.rows[0]
-    });
-  } catch (error) {
-    console.error('Error deleting screen size:', error);
+    console.error('Error updating pricing setting:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
