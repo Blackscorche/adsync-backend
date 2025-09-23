@@ -23,6 +23,19 @@ router.get('/', authenticateToken, async (req, res) => {
     } else if (req.user.role === 'admin') {
       // Admin can specify shop_id or get all
       shopId = req.query.shop_id;
+    } else if (req.user.role === 'design') {
+      // Designer can access playlists for their assigned shops
+      shopId = req.query.shop_id;
+      if (shopId) {
+        // Verify designer is assigned to this shop
+        const shopCheck = await pool.query(
+          'SELECT id FROM shops WHERE id = $1 AND designer_id = $2',
+          [shopId, req.user.userId]
+        );
+        if (shopCheck.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied to this shop' });
+        }
+      }
     } else {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -32,7 +45,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     if (shopId) {
       query = `
-        SELECT 
+        SELECT
           p.*,
           u.full_name as created_by_name,
           COUNT(DISTINCT pi.id) as item_count,
@@ -48,7 +61,7 @@ router.get('/', authenticateToken, async (req, res) => {
     } else {
       // Admin getting all playlists
       query = `
-        SELECT 
+        SELECT
           p.*,
           s.name as shop_name,
           u.full_name as created_by_name,
@@ -78,7 +91,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
     // Get playlist details
     const playlistResult = await pool.query(
-      `SELECT 
+      `SELECT
         p.*,
         s.name as shop_name,
         u.full_name as created_by_name
@@ -154,10 +167,10 @@ router.post('/', authenticateToken, requireRole(['design', 'admin']), async (req
     }
 
     const result = await pool.query(
-      `INSERT INTO playlists (name, description, shop_id, created_by, is_active)
-       VALUES ($1, $2, $3, $4, true)
+      `INSERT INTO playlists (name, shop_id, created_by, is_active)
+       VALUES ($1, $2, $3, true)
        RETURNING *`,
-      [name, description || null, shopId, req.user.userId]
+      [name, shopId, req.user.userId]
     );
 
     res.status(201).json(result.rows[0]);
