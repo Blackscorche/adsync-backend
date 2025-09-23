@@ -115,6 +115,10 @@ router.get('/shop/:shopId', authenticateToken, async (req, res) => {
     const result = await pool.query(`
       SELECT
         s.*,
+        CASE
+          WHEN s.status = 'active' AND s.last_heartbeat > NOW() - INTERVAL '5 minutes' THEN 'online'
+          ELSE 'offline'
+        END as computed_status,
         p.name as playlist_name,
         c.original_filename as current_content_name
       FROM screens s
@@ -125,7 +129,13 @@ router.get('/shop/:shopId', authenticateToken, async (req, res) => {
       ORDER BY s.name
     `, [shopId]);
 
-    res.json(result.rows);
+    // Map computed_status to status for backward compatibility
+    const screens = result.rows.map(screen => ({
+      ...screen,
+      status: screen.computed_status || screen.status
+    }));
+
+    res.json(screens);
   } catch (error) {
     console.error('Error fetching screens:', error);
     res.status(500).json({ error: 'Server error' });

@@ -144,7 +144,7 @@ router.get('/admin', authenticateToken, requireRole(['admin']), async (req, res)
     `;
 
     const params = [];
-    if (status) {
+    if (status && status !== 'all') {
       query += ' WHERE sr.status = $1';
       params.push(status);
     }
@@ -274,27 +274,35 @@ router.post('/:requestId/approve', authenticateToken, requireRole(['admin']), as
       [reviewerId, deviceId, screenResult.rows[0].id, requestId]
     );
 
-    // Create sales commission
+    // Get commission percentage from system settings
     const commissionSettings = await client.query(
-      'SELECT screen_commission_percent FROM settings LIMIT 1'
+      "SELECT setting_value FROM system_settings WHERE setting_key = 'commission_percentage'"
     );
-
-    const commissionPercent = commissionSettings.rows[0]?.screen_commission_percent || 20;
+    const commissionPercent = parseFloat(commissionSettings.rows[0]?.setting_value || 10);
     const commissionAmount = request.monthly_cost * (commissionPercent / 100);
 
-    await client.query(
-      `INSERT INTO sales_commissions (
-        shop_id, amount, percentage, type, description, reference_id
-      ) VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
+    // Get the sales user who registered this shop
+    const shopDetails = await client.query(
+      'SELECT registered_by FROM shops WHERE id = $1',
+      [request.shop_id]
+    );
+
+    // Create sales commission if shop was registered by a sales user
+    if (shopDetails.rows[0]?.registered_by) {
+      await client.query(`
+        INSERT INTO sales_commissions (
+          sales_user_id, shop_id, commission_type, amount,
+          percentage, status, month, description
+        )
+        VALUES ($1, $2, 'screen', $3, $4, 'approved', DATE_TRUNC('month', CURRENT_DATE), $5)
+      `, [
+        shopDetails.rows[0].registered_by,
         request.shop_id,
         commissionAmount,
         commissionPercent,
-        'screen',
-        `Commission for ${request.screen_type_name} screen - ${request.screen_name}`,
-        screenResult.rows[0].id
-      ]
-    );
+        `${commissionPercent}% of new ${request.screen_type_name} screen (£${parseFloat(request.monthly_cost).toFixed(2)})`
+      ]);
+    }
 
     await client.query('COMMIT');
 

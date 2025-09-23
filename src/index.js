@@ -78,6 +78,7 @@ app.use('/api/support', require('./routes/support'));
 app.use('/api/playlists', require('./routes/playlists'));
 app.use('/api/billing', require('./routes/billing'));
 app.use('/api/payment', require('./routes/payment'));
+app.use('/api/monitoring', require('./routes/monitoring'));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

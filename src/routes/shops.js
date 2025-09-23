@@ -80,15 +80,28 @@ router.get('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Shop not found' });
     }
 
-    // Get screens for this shop
+    // Get screens for this shop with computed status
     const screensResult = await pool.query(
-      'SELECT * FROM screens WHERE shop_id = $1 ORDER BY name',
+      `SELECT *,
+        CASE
+          WHEN status = 'active' AND last_heartbeat > NOW() - INTERVAL '5 minutes' THEN 'online'
+          ELSE 'offline'
+        END as computed_status
+      FROM screens
+      WHERE shop_id = $1
+      ORDER BY name`,
       [shopId]
     );
 
+    // Map computed_status to status for backward compatibility
+    const screens = screensResult.rows.map(screen => ({
+      ...screen,
+      status: screen.computed_status || screen.status
+    }));
+
     res.json({
       ...shopResult.rows[0],
-      screens: screensResult.rows
+      screens
     });
   } catch (error) {
     console.error('Error fetching shop:', error);
