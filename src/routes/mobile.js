@@ -28,8 +28,13 @@ router.post('/login', async (req, res) => {
         s.device_id,
         s.shop_id,
         s.status,
+        s.orientation,
+        s.resolution,
         sh.name as shop_name,
-        sh.approval_status as shop_status
+        sh.approval_status as shop_status,
+        sh.address as shop_address,
+        sh.contact_email as shop_email,
+        sh.contact_phone as shop_phone
       FROM screens s
       JOIN shops sh ON sh.id = s.shop_id
       WHERE s.shop_id = $1 AND s.device_id = $2
@@ -77,7 +82,16 @@ router.post('/login', async (req, res) => {
       screen: {
         id: screen.id,
         name: screen.name,
-        location: screen.location
+        location: screen.location,
+        orientation: screen.orientation,
+        resolution: screen.resolution
+      },
+      shop: {
+        id: screen.shop_id,
+        name: screen.shop_name,
+        address: screen.shop_address,
+        email: screen.shop_email,
+        phone: screen.shop_phone
       }
     };
 
