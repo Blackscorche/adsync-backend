@@ -15,7 +15,26 @@ app.use(helmet({
   contentSecurityPolicy: false // Disable CSP for now to avoid blocking resources
 }));
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true);
+
+    const allowedOrigins = [
+      process.env.FRONTEND_URL || 'http://localhost:3000',
+      'http://localhost:19006', // Expo web
+      'http://localhost:8081', // React Native packager
+      'exp://192.168', // Expo client on local network
+    ];
+
+    // Allow any origin that matches our patterns
+    if (allowedOrigins.some(allowed => origin.startsWith(allowed)) ||
+        origin.includes('localhost') ||
+        origin.includes('192.168') ||
+        origin.includes('10.0.2')) {
+      callback(null, true);
+    } else {
+      callback(null, true); // For now, allow all origins for mobile app testing
+    }
+  },
   credentials: true
 }));
 
@@ -38,8 +57,34 @@ const authLimiter = rateLimit({
   message: 'Too many login attempts from this IP, please try again later.'
 });
 
-// Apply general limiter to all API routes
-app.use('/api', generalLimiter);
+// Mobile-specific rate limiter - more lenient for heartbeats
+const mobileLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute window
+  max: 100, // 100 requests per minute
+  message: 'Too many requests from this device, please try again later.',
+  skipSuccessfulRequests: false,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Heartbeat-specific rate limiter - very lenient
+const heartbeatLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute window
+  max: 200, // 200 heartbeats per minute (basically unlimited for normal use)
+  message: 'Too many heartbeats from this device.',
+  skipFailedRequests: true, // Don't count failed requests
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply general limiter to all API routes EXCEPT mobile
+app.use('/api', (req, res, next) => {
+  // Skip rate limiting for mobile endpoints
+  if (req.path.startsWith('/mobile')) {
+    return next();
+  }
+  generalLimiter(req, res, next);
+});
 
 // Body parsing middleware
 app.use(express.json());
@@ -62,6 +107,16 @@ app.use('/uploads/tickets', staticCors, express.static(path.join(__dirname, '../
 
 // Routes with specific rate limiters
 app.use('/api/auth', authLimiter, require('./routes/auth'));
+
+// Mobile routes with custom middleware for heartbeat
+app.use('/api/mobile', (req, res, next) => {
+  // Apply different rate limiter for heartbeat endpoint
+  if (req.path === '/heartbeat') {
+    return heartbeatLimiter(req, res, next);
+  }
+  // Apply normal mobile limiter for other endpoints
+  return mobileLimiter(req, res, next);
+}, require('./routes/mobile')); // Mobile app endpoints with lenient rate limiting
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/shops', require('./routes/shops'));
 app.use('/api/screens', require('./routes/screens'));
