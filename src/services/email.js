@@ -157,7 +157,7 @@ class EmailService {
           <ul>
             <li>Invoice Number: ${bill.invoice_number}</li>
             <li>Amount Due: £${bill.total_amount.toFixed(2)}</li>
-            <li>Due Date: ${new Date(bill.payment_due_date).toLocaleDateString()}</li>
+            <li>Due Date: ${new Date(bill.due_date).toLocaleDateString()}</li>
           </ul>
           <table border="1" cellpadding="5">
             <tr><th>Description</th><th>Amount</th></tr>

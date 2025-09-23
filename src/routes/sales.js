@@ -54,15 +54,22 @@ router.get('/dashboard', authenticateToken, requireRole(['sales']), async (req, 
       [salesId]
     );
 
+    // Get shop stats - count directly from shops table
+    const shopStats = await pool.query(
+      `SELECT
+        COUNT(*) as total_shops,
+        COUNT(*) FILTER (WHERE approval_status = 'approved') as approved_shops
+       FROM shops
+       WHERE registered_by = $1`,
+      [salesId]
+    );
+
     // Get commission stats
     const commissionResult = await pool.query(
       `SELECT
-        COUNT(DISTINCT shop_id) as total_shops,
-        COUNT(DISTINCT shop_id) FILTER (WHERE shops.approval_status = 'approved') as approved_shops,
         COALESCE(SUM(amount) FILTER (WHERE status = 'approved'), 0) as total_earned,
         COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) as total_paid
        FROM sales_commissions
-       LEFT JOIN shops ON sales_commissions.shop_id = shops.id
        WHERE sales_user_id = $1`,
       [salesId]
     );
@@ -81,9 +88,17 @@ router.get('/dashboard', authenticateToken, requireRole(['sales']), async (req, 
       [salesId]
     );
 
+    // Combine stats from both queries
+    const combinedStats = {
+      total_shops: parseInt(shopStats.rows[0].total_shops),
+      approved_shops: parseInt(shopStats.rows[0].approved_shops),
+      total_earned: parseFloat(commissionResult.rows[0].total_earned),
+      total_paid: parseFloat(commissionResult.rows[0].total_paid)
+    };
+
     res.json({
       shops: shopsResult.rows,
-      stats: commissionResult.rows[0],
+      stats: combinedStats,
       recentActivity: recentActivity.rows
     });
   } catch (error) {

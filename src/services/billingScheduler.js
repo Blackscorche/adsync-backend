@@ -76,7 +76,7 @@ class BillingScheduler {
             INSERT INTO billing (
               shop_id, invoice_number, billing_period_start, billing_period_end,
               screen_charges, content_charges, subtotal, vat_amount, total_amount,
-              status, payment_due_date, created_at, description
+              status, due_date, created_at, description
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), $12)
           `, [
             shop.id, invoiceNumber, billingStart, billingEnd,
@@ -175,12 +175,12 @@ class BillingScheduler {
       const overdueBillsResult = await client.query(`
         SELECT b.*, s.id as shop_id, s.name as shop_name,
                u.email, u.full_name,
-               DATE_PART('day', NOW() - b.payment_due_date) as days_overdue
+               DATE_PART('day', NOW() - b.due_date) as days_overdue
         FROM billing b
         JOIN shops s ON b.shop_id = s.id
         JOIN users u ON s.owner_id = u.id
         WHERE b.status = 'pending'
-        AND b.payment_due_date < NOW()
+        AND b.due_date < NOW()
         AND s.payment_status = 'active'
       `);
 
@@ -231,15 +231,15 @@ class BillingScheduler {
       // Find shops with bills 30+ days overdue
       const terminationResult = await client.query(`
         SELECT DISTINCT s.*, u.email, u.full_name,
-               MIN(b.payment_due_date) as oldest_due_date,
-               DATE_PART('day', NOW() - MIN(b.payment_due_date)) as days_overdue
+               MIN(b.due_date) as oldest_due_date,
+               DATE_PART('day', NOW() - MIN(b.due_date)) as days_overdue
         FROM shops s
-        JOIN bills b ON s.id = b.shop_id
+        JOIN billing b ON s.id = b.shop_id
         JOIN users u ON s.owner_id = u.id
         WHERE s.payment_status = 'inactive'
         AND b.status IN ('pending', 'overdue')
         GROUP BY s.id, u.email, u.full_name
-        HAVING DATE_PART('day', NOW() - MIN(b.payment_due_date)) >= 30
+        HAVING DATE_PART('day', NOW() - MIN(b.due_date)) >= 30
       `);
 
       for (const shop of terminationResult.rows) {

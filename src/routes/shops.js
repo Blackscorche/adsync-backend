@@ -279,22 +279,42 @@ router.patch('/:id/subscription', authenticateToken, requireRole(['admin']), asy
 
 // Delete shop (Admin only)
 router.delete('/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const shopId = req.params.id;
 
-    const result = await pool.query(
-      'DELETE FROM shops WHERE id = $1 RETURNING id',
+    await client.query('BEGIN');
+
+    // First, remove shop_id reference from users table
+    await client.query(
+      'UPDATE users SET shop_id = NULL WHERE shop_id = $1',
+      [shopId]
+    );
+
+    // Then delete the shop (this will cascade delete related records)
+    const result = await client.query(
+      'DELETE FROM shops WHERE id = $1 RETURNING id, name',
       [shopId]
     );
 
     if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Shop not found' });
     }
 
-    res.json({ message: 'Shop deleted successfully' });
+    await client.query('COMMIT');
+
+    res.json({
+      message: 'Shop deleted successfully',
+      deletedShop: result.rows[0]
+    });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error deleting shop:', error);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Failed to delete shop' });
+  } finally {
+    client.release();
   }
 });
 

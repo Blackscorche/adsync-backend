@@ -1,4 +1,5 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 
@@ -17,6 +18,86 @@ router.get('/types', authenticateToken, async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching screen types:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Player App Authentication - Shop ID + Screen ID
+router.post('/player/authenticate', async (req, res) => {
+  try {
+    const { shop_id, screen_id } = req.body;
+
+    if (!shop_id || !screen_id) {
+      return res.status(400).json({
+        error: 'Shop ID and Screen ID are required'
+      });
+    }
+
+    // Verify that screen belongs to the shop
+    const result = await pool.query(`
+      SELECT
+        s.id,
+        s.name,
+        s.location,
+        s.device_id,
+        s.shop_id,
+        s.status,
+        sh.name as shop_name,
+        sh.approval_status as shop_status,
+        sh.payment_status
+      FROM screens s
+      JOIN shops sh ON sh.id = s.shop_id
+      WHERE s.id = $1 AND s.shop_id = $2
+    `, [screen_id, shop_id]);
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({
+        error: 'Invalid Shop ID or Screen ID'
+      });
+    }
+
+    const screen = result.rows[0];
+
+    // Check if shop is active
+    if (screen.shop_status !== 'approved' || screen.payment_status !== 'active') {
+      return res.status(403).json({
+        error: 'Shop is not active. Please contact support.',
+        shop_status: screen.shop_status,
+        payment_status: screen.payment_status
+      });
+    }
+
+    // Generate JWT token for the player app
+    const token = jwt.sign(
+      {
+        shop_id: screen.shop_id,
+        screen_id: screen.id,
+        type: 'player'
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '30d' } // Long expiry for player apps
+    );
+
+    // Update last connected timestamp
+    await pool.query(
+      'UPDATE screens SET last_heartbeat = CURRENT_TIMESTAMP WHERE id = $1',
+      [screen.id]
+    );
+
+    res.json({
+      success: true,
+      token,
+      screen: {
+        id: screen.id,
+        name: screen.name,
+        location: screen.location,
+        shop_id: screen.shop_id,
+        shop_name: screen.shop_name
+      }
+    });
+
+  } catch (error) {
+    console.error('Player authentication error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -291,6 +372,78 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Screen deleted successfully' });
   } catch (error) {
     console.error('Error deleting screen:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get playlist for player app (using JWT auth)
+router.get('/player/playlist', async (req, res) => {
+  try {
+    // Extract token from Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+      if (decoded.type !== 'player') {
+        return res.status(403).json({ error: 'Invalid token type' });
+      }
+
+      const { screen_id } = decoded;
+
+      // Get latest playlist for this screen
+      const playlistResult = await pool.query(`
+        SELECT
+          p.id,
+          p.name,
+          p.updated_at,
+          json_agg(
+            json_build_object(
+              'id', c.id,
+              'url', c.file_url,
+              'type', c.file_type,
+              'filename', c.filename,
+              'duration', pi.duration,
+              'position', pi.position
+            ) ORDER BY pi.position
+          ) as items
+        FROM screen_playlists sp
+        JOIN playlists p ON p.id = sp.playlist_id
+        JOIN playlist_items pi ON pi.playlist_id = p.id
+        JOIN content c ON c.id = pi.content_id
+        WHERE sp.screen_id = $1 AND p.is_active = true
+        GROUP BY p.id, p.name, p.updated_at
+        LIMIT 1
+      `, [screen_id]);
+
+      if (playlistResult.rows.length === 0) {
+        return res.json({
+          playlist: null,
+          message: 'No playlist assigned to this screen'
+        });
+      }
+
+      // Update heartbeat
+      await pool.query(
+        'UPDATE screens SET last_heartbeat = CURRENT_TIMESTAMP WHERE id = $1',
+        [screen_id]
+      );
+
+      res.json({
+        playlist: playlistResult.rows[0]
+      });
+
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+  } catch (error) {
+    console.error('Error fetching player playlist:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

@@ -597,6 +597,49 @@ const migrations = [
     down: async (client) => {
       // Restore original constraints
     }
+  },
+
+  {
+    version: 10,
+    name: 'Fix users shop_id foreign key constraint',
+    up: async (client) => {
+      // First check if the column exists
+      const columnCheck = await client.query(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'users' AND column_name = 'shop_id'
+      `);
+
+      if (columnCheck.rows.length === 0) {
+        // Add shop_id column if it doesn't exist
+        await client.query(`
+          ALTER TABLE users
+          ADD COLUMN shop_id INTEGER
+        `);
+      }
+
+      // Drop existing foreign key constraint if exists
+      await client.query(`
+        ALTER TABLE users
+        DROP CONSTRAINT IF EXISTS users_shop_id_fkey
+      `);
+
+      // Add new constraint with SET NULL on delete
+      await client.query(`
+        ALTER TABLE users
+        ADD CONSTRAINT users_shop_id_fkey
+        FOREIGN KEY (shop_id)
+        REFERENCES shops(id)
+        ON DELETE SET NULL
+      `);
+    },
+    down: async (client) => {
+      // Revert to CASCADE if needed (not recommended)
+      await client.query(`
+        ALTER TABLE users
+        DROP CONSTRAINT IF EXISTS users_shop_id_fkey
+      `);
+    }
   }
 
   // ADD NEW MIGRATIONS HERE

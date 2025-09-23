@@ -174,7 +174,7 @@ router.post('/shops/:shopId/generate-invoice', authenticateToken, requireRole(['
       `INSERT INTO billing (
         shop_id, invoice_number, billing_period_start, billing_period_end,
         screen_charges, content_charges, additional_charges, subtotal,
-        vat_amount, total_amount, status, payment_due_date
+        vat_amount, total_amount, status, due_date
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *`,
       [
@@ -254,7 +254,7 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
     doc.fontSize(16).text('INVOICE', 400, 50);
     doc.fontSize(10).text(`Invoice #: ${bill.invoice_number}`, 400, 80);
     doc.text(`Date: ${new Date(bill.created_at).toLocaleDateString()}`, 400, 95);
-    doc.text(`Due Date: ${new Date(bill.payment_due_date).toLocaleDateString()}`, 400, 110);
+    doc.text(`Due Date: ${new Date(bill.due_date).toLocaleDateString()}`, 400, 110);
 
     // Bill to
     doc.fontSize(12).text('Bill To:', 50, 160);
@@ -365,7 +365,7 @@ router.get('/unpaid', authenticateToken, requireRole(['admin']), async (req, res
        JOIN shops s ON b.shop_id = s.id
        JOIN users u ON s.owner_id = u.id
        WHERE b.status = 'pending'
-       ORDER BY b.payment_due_date ASC`
+       ORDER BY b.due_date ASC`
     );
 
     res.json(result.rows);
