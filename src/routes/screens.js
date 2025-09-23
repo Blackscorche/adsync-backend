@@ -113,10 +113,10 @@ router.get('/shop/:shopId', authenticateToken, async (req, res) => {
     }
 
     const result = await pool.query(`
-      SELECT 
+      SELECT
         s.*,
         p.name as playlist_name,
-        c.filename as current_content_name
+        c.original_filename as current_content_name
       FROM screens s
       LEFT JOIN screen_playlists sp ON sp.screen_id = s.id
       LEFT JOIN playlists p ON p.id = sp.playlist_id
@@ -407,7 +407,7 @@ router.get('/player/playlist', async (req, res) => {
               'id', c.id,
               'url', c.file_url,
               'type', c.file_type,
-              'filename', c.filename,
+              'filename', c.original_filename,
               'duration', pi.duration,
               'position', pi.position
             ) ORDER BY pi.position

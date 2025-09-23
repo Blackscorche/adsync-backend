@@ -52,7 +52,7 @@ router.get('/shops/:shopId', authenticateToken, async (req, res) => {
 
     const usageResult = await pool.query(
       `SELECT COUNT(*) as content_uploads
-       FROM contents
+       FROM content
        WHERE shop_id = $1
        AND created_at >= $2`,
       [shopId, startOfMonth]
@@ -131,7 +131,7 @@ router.post('/shops/:shopId/generate-invoice', authenticateToken, requireRole(['
     // Get content usage for the month
     const usageResult = await pool.query(
       `SELECT COUNT(*) as content_uploads
-       FROM contents
+       FROM content
        WHERE shop_id = $1
        AND created_at >= $2
        AND created_at <= $3`,

@@ -640,6 +640,85 @@ const migrations = [
         DROP CONSTRAINT IF EXISTS users_shop_id_fkey
       `);
     }
+  },
+
+  {
+    version: 11,
+    name: 'Add missing columns to playlists and screens',
+    up: async (client) => {
+      // Add updated_at column to playlists table if it doesn't exist
+      const playlistsColumnCheck = await client.query(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'playlists' AND column_name = 'updated_at'
+      `);
+
+      if (playlistsColumnCheck.rows.length === 0) {
+        await client.query(`
+          ALTER TABLE playlists
+          ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        `);
+
+        // Set updated_at to created_at for existing records
+        await client.query(`
+          UPDATE playlists
+          SET updated_at = created_at
+          WHERE updated_at IS NULL
+        `);
+      }
+
+      // Add current_content_id column to screens table if it doesn't exist
+      const screensColumnCheck = await client.query(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'screens' AND column_name = 'current_content_id'
+      `);
+
+      if (screensColumnCheck.rows.length === 0) {
+        await client.query(`
+          ALTER TABLE screens
+          ADD COLUMN current_content_id INTEGER
+        `);
+
+        // Add foreign key constraint
+        await client.query(`
+          ALTER TABLE screens
+          ADD CONSTRAINT screens_current_content_id_fkey
+          FOREIGN KEY (current_content_id)
+          REFERENCES content(id)
+          ON DELETE SET NULL
+        `);
+      }
+
+      // Add trigger to automatically update updated_at column for playlists
+      await client.query(`
+        CREATE OR REPLACE FUNCTION update_updated_at_column()
+        RETURNS TRIGGER AS $$
+        BEGIN
+          NEW.updated_at = CURRENT_TIMESTAMP;
+          RETURN NEW;
+        END;
+        $$ language 'plpgsql'
+      `);
+
+      await client.query(`
+        DROP TRIGGER IF EXISTS update_playlists_updated_at ON playlists
+      `);
+
+      await client.query(`
+        CREATE TRIGGER update_playlists_updated_at
+        BEFORE UPDATE ON playlists
+        FOR EACH ROW
+        EXECUTE FUNCTION update_updated_at_column()
+      `);
+    },
+    down: async (client) => {
+      // Remove the added columns and triggers
+      await client.query(`DROP TRIGGER IF EXISTS update_playlists_updated_at ON playlists`);
+      await client.query(`DROP FUNCTION IF EXISTS update_updated_at_column()`);
+      await client.query(`ALTER TABLE screens DROP COLUMN IF EXISTS current_content_id`);
+      await client.query(`ALTER TABLE playlists DROP COLUMN IF EXISTS updated_at`);
+    }
   }
 
   // ADD NEW MIGRATIONS HERE

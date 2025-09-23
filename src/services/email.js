@@ -93,7 +93,7 @@ class EmailService {
     try {
       const result = await pool.query(
         `SELECT c.*, s.name as shop_name, u.email as designer_email, u.full_name as designer_name
-         FROM contents c
+         FROM content c
          JOIN shops s ON c.shop_id = s.id
          LEFT JOIN users u ON s.designer_id = u.id
          WHERE c.id = $1`,
