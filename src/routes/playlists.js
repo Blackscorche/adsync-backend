@@ -122,12 +122,17 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
     // Get playlist items with content details
     const itemsResult = await pool.query(
-      `SELECT 
-        pi.*,
-        c.filename,
-        c.file_url,
-        c.file_type,
-        c.thumbnail_url
+      `SELECT
+        pi.id,
+        pi.playlist_id,
+        pi.content_id,
+        pi.position,
+        pi.duration,
+        json_build_object(
+          'title', c.original_filename,
+          'file_url', c.file_url,
+          'file_type', c.file_type
+        ) as content
        FROM playlist_items pi
        LEFT JOIN content c ON pi.content_id = c.id
        WHERE pi.playlist_id = $1
@@ -361,6 +366,55 @@ router.delete('/:playlistId/items/:itemId', authenticateToken, requireRole(['des
   }
 });
 
+// Update playlist items (positions and durations) - Designers only
+router.put('/:id/items', authenticateToken, requireRole(['design']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { items } = req.body; // Array of { content_id, position, duration }
+
+    // Verify designer has access to this playlist's shop
+    const accessCheck = await pool.query(
+      `SELECT p.id FROM playlists p
+       JOIN shops s ON p.shop_id = s.id
+       WHERE p.id = $1 AND s.designer_id = $2`,
+      [id, req.user.userId]
+    );
+
+    if (accessCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Access denied to this playlist' });
+    }
+
+    // Clear existing items and add new ones in a transaction
+    await pool.query('BEGIN');
+
+    try {
+      // Delete all existing items for this playlist
+      await pool.query(
+        'DELETE FROM playlist_items WHERE playlist_id = $1',
+        [id]
+      );
+
+      // Insert new items
+      for (const item of items) {
+        await pool.query(
+          `INSERT INTO playlist_items (playlist_id, content_id, position, duration)
+           VALUES ($1, $2, $3, $4)`,
+          [id, item.content_id, item.position, item.duration]
+        );
+      }
+
+      await pool.query('COMMIT');
+      res.json({ message: 'Playlist items updated successfully' });
+    } catch (error) {
+      await pool.query('ROLLBACK');
+      throw error;
+    }
+  } catch (error) {
+    console.error('Error updating playlist items:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Delete playlist
 router.delete('/:id', authenticateToken, requireRole(['design', 'admin']), async (req, res) => {
   try {
@@ -518,7 +572,7 @@ router.get('/owner/:shopId', authenticateToken, requireRole(['owner']), async (r
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Get published playlists for the shop
+    // Get only published playlists for the shop
     const result = await pool.query(
       `SELECT
         p.*,

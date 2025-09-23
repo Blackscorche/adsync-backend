@@ -37,10 +37,15 @@ router.get('/shop/:shopId/content', authenticateToken, requireRole(['design']), 
   try {
     const { shopId } = req.params;
 
+    // Validate shopId
+    if (!shopId || shopId === 'undefined' || isNaN(parseInt(shopId))) {
+      return res.status(400).json({ error: 'Invalid shop ID' });
+    }
+
     // Verify designer is assigned to this shop
     const shopCheck = await pool.query(
       'SELECT id FROM shops WHERE id = $1 AND designer_id = $2',
-      [shopId, req.user.userId]
+      [parseInt(shopId), req.user.userId]
     );
 
     if (shopCheck.rows.length === 0) {
@@ -51,13 +56,14 @@ router.get('/shop/:shopId/content', authenticateToken, requireRole(['design']), 
     const result = await pool.query(
       `SELECT
         c.*,
+        c.original_filename as title,
         u.full_name as uploaded_by_name
        FROM content c
        LEFT JOIN users u ON c.uploaded_by = u.id
        WHERE c.shop_id = $1
        AND c.status IN ('approved', 'published')
        ORDER BY c.created_at DESC`,
-      [shopId]
+      [parseInt(shopId)]
     );
 
     res.json(result.rows);
@@ -103,28 +109,33 @@ router.get('/assigned-shops', authenticateToken, requireRole(['design']), async 
   }
 });
 
-// Get content for designer's shops that needs design or has been rejected
+// Get all content for designer's shops (including published)
 router.get('/pending-content', authenticateToken, requireRole(['design']), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT
         c.*,
+        c.original_filename as title,
         s.name as shop_name,
         u.full_name as uploaded_by_name,
-        r.full_name as reviewed_by_name
+        r.full_name as reviewed_by_name,
+        p.full_name as published_by_name
        FROM content c
        JOIN shops s ON c.shop_id = s.id
        LEFT JOIN users u ON c.uploaded_by = u.id
        LEFT JOIN users r ON c.reviewed_by = r.id
+       LEFT JOIN users p ON c.published_by = p.id
        WHERE s.designer_id = $1
-         AND c.status IN ('pending', 'in_design', 'rejected', 'designed', 'approved')
+         AND c.status IN ('pending', 'in_design', 'rejected', 'designed', 'approved', 'published')
        ORDER BY
          CASE
            WHEN c.status = 'rejected' THEN 0
            WHEN c.status = 'pending' THEN 1
            WHEN c.status = 'in_design' THEN 2
            WHEN c.status = 'designed' THEN 3
-           ELSE 4
+           WHEN c.status = 'approved' THEN 4
+           WHEN c.status = 'published' THEN 5
+           ELSE 6
          END,
          c.created_at DESC`,
       [req.user.userId]
