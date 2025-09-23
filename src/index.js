@@ -19,12 +19,27 @@ app.use(cors({
   credentials: true
 }));
 
-// Rate limiting
-const limiter = rateLimit({
+// Rate limiting - Different limits for different endpoints
+const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  max: 1000, // Increased to 1000 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
 });
-app.use('/api', limiter);
+
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 50, // 50 uploads per 15 minutes
+  message: 'Too many uploads from this IP, please try again later.'
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 login attempts per 15 minutes
+  message: 'Too many login attempts from this IP, please try again later.'
+});
+
+// Apply general limiter to all API routes
+app.use('/api', generalLimiter);
 
 // Body parsing middleware
 app.use(express.json());
@@ -45,11 +60,13 @@ app.use('/uploads/thumbnails', staticCors, express.static(path.join(__dirname, '
 app.use('/uploads/shops', staticCors, express.static(path.join(__dirname, '../uploads/shops')));
 app.use('/uploads/tickets', staticCors, express.static(path.join(__dirname, '../uploads/tickets')));
 
-// Routes
-app.use('/api/auth', require('./routes/auth'));
+// Routes with specific rate limiters
+app.use('/api/auth', authLimiter, require('./routes/auth'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/shops', require('./routes/shops'));
 app.use('/api/screens', require('./routes/screens'));
+app.use('/api/screen-requests', require('./routes/screenRequests'));
+app.use('/api/content/upload', uploadLimiter); // Apply upload limiter specifically to upload endpoint
 app.use('/api/content', require('./routes/content'));
 app.use('/api/postcode', require('./routes/postcode'));
 app.use('/api/sales', require('./routes/sales'));

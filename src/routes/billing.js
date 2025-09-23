@@ -46,6 +46,21 @@ router.get('/shops/:shopId', authenticateToken, async (req, res) => {
       [shopId]
     );
 
+    // Get actual screen counts by type
+    const screenCountsResult = await pool.query(
+      `SELECT
+        st.name as screen_type,
+        st.size_inches,
+        st.monthly_price,
+        COUNT(s.id) as count
+       FROM screens s
+       JOIN screen_types st ON s.screen_type_id = st.id
+       WHERE s.shop_id = $1 AND s.status = 'active'
+       GROUP BY st.id, st.name, st.size_inches, st.monthly_price
+       ORDER BY st.size_inches`,
+      [shopId]
+    );
+
     // Get current month usage
     const currentMonth = new Date();
     const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
@@ -73,6 +88,53 @@ router.get('/shops/:shopId', authenticateToken, async (req, res) => {
 
     const totalCharges = screenCharges + contentCharges;
 
+    // Get all credit transactions (purchases history)
+    const transactionsResult = await pool.query(
+      `SELECT * FROM credit_transactions
+       WHERE shop_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [shopId]
+    );
+
+    // Get screen purchase history with screen type information
+    const screenPurchasesResult = await pool.query(
+      `SELECT
+        s.id,
+        s.device_id,
+        s.name as screen_name,
+        s.size,
+        s.location,
+        s.status,
+        s.created_at as purchase_date,
+        s.monthly_cost,
+        st.name as screen_type_name,
+        st.size_inches as screen_size,
+        st.monthly_price as screen_price
+       FROM screens s
+       LEFT JOIN screen_types st ON s.screen_type_id = st.id
+       WHERE s.shop_id = $1
+       ORDER BY s.created_at DESC`,
+      [shopId]
+    );
+
+    // Get content purchase history (paid uploads)
+    const contentPurchasesResult = await pool.query(
+      `SELECT
+        c.id,
+        c.original_filename,
+        c.status,
+        c.created_at as upload_date,
+        c.charge_amount,
+        c.was_free_upload
+       FROM content c
+       WHERE c.shop_id = $1
+       AND c.charge_amount > 0
+       ORDER BY c.created_at DESC
+       LIMIT 50`,
+      [shopId]
+    );
+
     res.json({
       shop: {
         id: shop.id,
@@ -85,6 +147,7 @@ router.get('/shops/:shopId', authenticateToken, async (req, res) => {
         screen_43_price: shop.screen_43_price,
         screen_55_price: shop.screen_55_price
       },
+      screenTypes: screenCountsResult.rows,
       currentMonth: {
         contentUploads,
         freeUploads,
@@ -93,7 +156,10 @@ router.get('/shops/:shopId', authenticateToken, async (req, res) => {
         screenCharges,
         totalCharges
       },
-      bills: billsResult.rows
+      bills: billsResult.rows,
+      transactions: transactionsResult.rows,
+      screenPurchases: screenPurchasesResult.rows,
+      contentPurchases: contentPurchasesResult.rows
     });
 
   } catch (error) {

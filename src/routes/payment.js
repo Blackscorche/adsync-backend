@@ -4,7 +4,7 @@ const { authenticateToken, requireRole } = require('../middleware/auth');
 const emailService = require('../services/email');
 
 // Initialize Stripe with your secret key
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_51OHJGxSJZRvNQz1eXrYgLqMz1zXqHfKJ0KqLZAJYFhXx5X0XqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXqXq');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const router = express.Router();
 

@@ -82,13 +82,18 @@ router.get('/', authenticateToken, async (req, res) => {
 
       const shopId = shopResult.rows[0].id;
       query = `
-        SELECT 
+        SELECT
           c.*,
           u.full_name as uploaded_by_name,
-          r.full_name as reviewed_by_name
+          r.full_name as reviewed_by_name,
+          d.full_name as designed_by_name,
+          sd.full_name as shop_designer_name
         FROM content c
         LEFT JOIN users u ON c.uploaded_by = u.id
         LEFT JOIN users r ON c.reviewed_by = r.id
+        LEFT JOIN users d ON c.designed_by = d.id
+        LEFT JOIN shops s ON c.shop_id = s.id
+        LEFT JOIN users sd ON s.designer_id = sd.id
         WHERE c.shop_id = $1
         ORDER BY c.created_at DESC
       `;

@@ -722,6 +722,221 @@ const migrations = [
   }
 
   // ADD NEW MIGRATIONS HERE
+  ,
+  {
+    version: 12,
+    name: 'Add description column to sales_commissions',
+    up: async (client) => {
+      // Check if description column exists
+      const columnCheck = await client.query(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'sales_commissions' AND column_name = 'description'
+      `);
+
+      if (columnCheck.rows.length === 0) {
+        await client.query(`
+          ALTER TABLE sales_commissions
+          ADD COLUMN description TEXT
+        `);
+      }
+    },
+    down: async (client) => {
+      await client.query(`ALTER TABLE sales_commissions DROP COLUMN IF EXISTS description`);
+    }
+  },
+  {
+    version: 13,
+    name: 'Fix deduct_credit function to store negative amounts',
+    up: async (client) => {
+      // Update the deduct_credit function to store negative amounts for charges
+      await client.query(`
+        CREATE OR REPLACE FUNCTION deduct_credit(
+          p_shop_id INTEGER,
+          p_amount DECIMAL,
+          p_type VARCHAR,
+          p_description TEXT,
+          p_reference_id INTEGER DEFAULT NULL
+        ) RETURNS BOOLEAN AS $$
+        DECLARE
+          v_current_balance DECIMAL;
+          v_new_balance DECIMAL;
+        BEGIN
+          SELECT credit_balance INTO v_current_balance
+          FROM shops WHERE id = p_shop_id FOR UPDATE;
+
+          IF v_current_balance < p_amount THEN
+            RETURN FALSE;
+          END IF;
+
+          v_new_balance := v_current_balance - p_amount;
+
+          UPDATE shops SET credit_balance = v_new_balance WHERE id = p_shop_id;
+
+          -- Store as negative amount for debits
+          INSERT INTO credit_transactions (
+            shop_id, amount, type, description, reference_id,
+            balance_before, balance_after
+          ) VALUES (
+            p_shop_id, -p_amount, p_type, p_description, p_reference_id,
+            v_current_balance, v_new_balance
+          );
+
+          RETURN TRUE;
+        END;
+        $$ LANGUAGE plpgsql;
+      `);
+
+      // Update existing positive charge transactions to negative
+      await client.query(`
+        UPDATE credit_transactions
+        SET amount = -ABS(amount)
+        WHERE type IN ('upload_charge', 'screen_charge', 'screen_subscription', 'charge', 'debit', 'monthly_billing')
+        AND amount > 0
+      `);
+    },
+    down: async (client) => {
+      // Revert to original function
+      await client.query(`
+        CREATE OR REPLACE FUNCTION deduct_credit(
+          p_shop_id INTEGER,
+          p_amount DECIMAL,
+          p_type VARCHAR,
+          p_description TEXT,
+          p_reference_id INTEGER DEFAULT NULL
+        ) RETURNS BOOLEAN AS $$
+        DECLARE
+          v_current_balance DECIMAL;
+          v_new_balance DECIMAL;
+        BEGIN
+          SELECT credit_balance INTO v_current_balance
+          FROM shops WHERE id = p_shop_id FOR UPDATE;
+
+          IF v_current_balance < p_amount THEN
+            RETURN FALSE;
+          END IF;
+
+          v_new_balance := v_current_balance - p_amount;
+
+          UPDATE shops SET credit_balance = v_new_balance WHERE id = p_shop_id;
+
+          INSERT INTO credit_transactions (
+            shop_id, amount, type, description, reference_id,
+            balance_before, balance_after
+          ) VALUES (
+            p_shop_id, p_amount, p_type, p_description, p_reference_id,
+            v_current_balance, v_new_balance
+          );
+
+          RETURN TRUE;
+        END;
+        $$ LANGUAGE plpgsql;
+      `);
+    }
+  },
+  {
+    version: 14,
+    name: 'Create screen requests table',
+    up: async (client) => {
+      // Create screen_requests table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS screen_requests (
+          id SERIAL PRIMARY KEY,
+          shop_id INTEGER NOT NULL REFERENCES shops(id),
+          requested_by INTEGER NOT NULL REFERENCES users(id),
+          screen_name VARCHAR(255) NOT NULL,
+          location VARCHAR(100),
+          screen_type_id INTEGER NOT NULL REFERENCES screen_types(id),
+          monthly_cost DECIMAL(10,2) NOT NULL,
+
+          -- Payment info
+          payment_amount DECIMAL(10,2) NOT NULL,
+          transaction_id INTEGER REFERENCES credit_transactions(id),
+
+          -- Request status
+          status VARCHAR(20) NOT NULL DEFAULT 'pending',
+          -- pending, approved, rejected, expired, cancelled
+
+          -- Admin handling
+          reviewed_by INTEGER REFERENCES users(id),
+          reviewed_at TIMESTAMP,
+          device_id VARCHAR(100),
+          rejection_reason TEXT,
+
+          -- Auto-reject tracking
+          expires_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL '2 days'),
+
+          -- Screen creation tracking
+          screen_id INTEGER REFERENCES screens(id),
+
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+          CONSTRAINT check_status CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'cancelled'))
+        )
+      `);
+
+      // Create indexes
+      await client.query(`
+        CREATE INDEX idx_screen_requests_shop_id ON screen_requests(shop_id);
+        CREATE INDEX idx_screen_requests_status ON screen_requests(status);
+        CREATE INDEX idx_screen_requests_expires_at ON screen_requests(expires_at);
+      `);
+
+      // Create function to auto-expire requests
+      await client.query(`
+        CREATE OR REPLACE FUNCTION auto_expire_screen_requests()
+        RETURNS void
+        LANGUAGE plpgsql
+        AS $$
+        DECLARE
+          expired_request RECORD;
+        BEGIN
+          -- Find all pending requests that have expired
+          FOR expired_request IN
+            SELECT id, shop_id, payment_amount, transaction_id
+            FROM screen_requests
+            WHERE status = 'pending'
+            AND expires_at < CURRENT_TIMESTAMP
+          LOOP
+            -- Update status to expired
+            UPDATE screen_requests
+            SET status = 'expired',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = expired_request.id;
+
+            -- Refund the payment
+            IF expired_request.payment_amount > 0 THEN
+              UPDATE shops
+              SET credit_balance = credit_balance + expired_request.payment_amount
+              WHERE id = expired_request.shop_id;
+
+              -- Record refund transaction
+              INSERT INTO credit_transactions (
+                shop_id, amount, type, description, reference_id,
+                balance_before, balance_after
+              ) VALUES (
+                expired_request.shop_id,
+                expired_request.payment_amount,
+                'refund',
+                'Auto-refund for expired screen request #' || expired_request.id,
+                expired_request.id,
+                (SELECT credit_balance - expired_request.payment_amount FROM shops WHERE id = expired_request.shop_id),
+                (SELECT credit_balance FROM shops WHERE id = expired_request.shop_id)
+              );
+            END IF;
+          END LOOP;
+        END;
+        $$
+      `);
+
+      console.log('   ✓ Created screen_requests table and auto-expire function');
+    },
+    down: async (client) => {
+      await client.query(`DROP TABLE IF EXISTS screen_requests CASCADE`);
+      await client.query(`DROP FUNCTION IF EXISTS auto_expire_screen_requests() CASCADE`);
+    }
+  }
 ];
 
 async function runMigrations() {
