@@ -936,6 +936,40 @@ const migrations = [
       await client.query(`DROP TABLE IF EXISTS screen_requests CASCADE`);
       await client.query(`DROP FUNCTION IF EXISTS auto_expire_screen_requests() CASCADE`);
     }
+  },
+  {
+    version: 15,
+    name: 'Add invoice details to billing table',
+    up: async (client) => {
+      // Add only the essential missing columns
+      await client.query(`
+        ALTER TABLE billing
+        ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(50),
+        ADD COLUMN IF NOT EXISTS billing_month DATE,
+        ADD COLUMN IF NOT EXISTS total_amount DECIMAL(10,2)
+      `);
+
+      // Update existing rows to use amount as total_amount
+      await client.query(`
+        UPDATE billing
+        SET total_amount = amount,
+            billing_month = bill_date
+        WHERE total_amount IS NULL
+      `);
+
+      // Create index for faster queries
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_billing_shop_status ON billing(shop_id, status);
+      `);
+    },
+    down: async (client) => {
+      await client.query(`
+        ALTER TABLE billing
+        DROP COLUMN IF EXISTS invoice_number,
+        DROP COLUMN IF EXISTS billing_month,
+        DROP COLUMN IF EXISTS total_amount
+      `);
+    }
   }
 ];
 

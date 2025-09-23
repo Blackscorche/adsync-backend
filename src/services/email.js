@@ -156,15 +156,12 @@ class EmailService {
           <h3>Invoice Details:</h3>
           <ul>
             <li>Invoice Number: ${bill.invoice_number}</li>
-            <li>Amount Due: £${bill.total_amount.toFixed(2)}</li>
+            <li>Amount Due: £${parseFloat(bill.total_amount || bill.amount || 0).toFixed(2)}</li>
             <li>Due Date: ${new Date(bill.due_date).toLocaleDateString()}</li>
           </ul>
           <table border="1" cellpadding="5">
             <tr><th>Description</th><th>Amount</th></tr>
-            <tr><td>Screen Subscription</td><td>£${bill.screen_charges.toFixed(2)}</td></tr>
-            <tr><td>Content Uploads</td><td>£${bill.content_charges.toFixed(2)}</td></tr>
-            <tr><td>VAT (20%)</td><td>£${bill.vat_amount.toFixed(2)}</td></tr>
-            <tr><td><strong>Total</strong></td><td><strong>£${bill.total_amount.toFixed(2)}</strong></td></tr>
+            <tr><td>${bill.description || 'Monthly Service Charges'}</td><td>£${parseFloat(bill.total_amount || bill.amount || 0).toFixed(2)}</td></tr>
           </table>
           <a href="${process.env.FRONTEND_URL}/owner/billing">Pay Invoice</a>
         `
@@ -200,12 +197,12 @@ class EmailService {
         html: `
           <h2>Payment Confirmed</h2>
           <p>Hi ${bill.full_name},</p>
-          <p>We've received your payment of <strong>£${bill.total_amount.toFixed(2)}</strong> for invoice <strong>${bill.invoice_number}</strong>.</p>
+          <p>We've received your payment of <strong>£${parseFloat(bill.total_amount || bill.amount || 0).toFixed(2)}</strong> for invoice <strong>${bill.invoice_number}</strong>.</p>
           <h3>Payment Details:</h3>
           <ul>
-            <li>Amount Paid: £${bill.total_amount.toFixed(2)}</li>
-            <li>Payment Date: ${new Date(bill.payment_date).toLocaleDateString()}</li>
-            <li>Reference: ${bill.payment_reference}</li>
+            <li>Amount Paid: £${parseFloat(bill.total_amount || bill.amount || 0).toFixed(2)}</li>
+            <li>Payment Date: ${new Date(bill.paid_at || new Date()).toLocaleDateString()}</li>
+            <li>Payment Method: ${bill.payment_method || 'N/A'}</li>
           </ul>
           <p>Thank you for your prompt payment!</p>
         `

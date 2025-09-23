@@ -220,7 +220,7 @@ router.post('/create-intent', authenticateToken, async (req, res) => {
     // Store payment intent ID in database
     await pool.query(
       `UPDATE billing
-       SET payment_intent_id = $1, updated_at = NOW()
+       SET stripe_payment_intent_id = $1, updated_at = NOW()
        WHERE id = $2`,
       [paymentIntent.id, billId]
     );
@@ -254,12 +254,11 @@ router.post('/confirm', authenticateToken, async (req, res) => {
       `UPDATE billing
        SET status = 'paid',
            payment_method = 'card',
-           payment_reference = $1,
-           payment_date = NOW(),
+           paid_at = NOW(),
            updated_at = NOW()
-       WHERE id = $2 AND payment_intent_id = $1
+       WHERE id = $1 AND stripe_payment_intent_id = $2
        RETURNING *`,
-      [paymentIntentId, billId]
+      [billId, paymentIntentId]
     );
 
     if (result.rows.length === 0) {
@@ -371,11 +370,10 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         `UPDATE billing
          SET status = 'paid',
              payment_method = 'card',
-             payment_reference = $1,
-             payment_date = NOW(),
+             paid_at = NOW(),
              updated_at = NOW()
-         WHERE payment_intent_id = $2`,
-        [paymentIntent.id, paymentIntent.id]
+         WHERE stripe_payment_intent_id = $1`,
+        [paymentIntent.id]
       );
 
       // Create notification for admin
@@ -383,7 +381,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         `SELECT b.*, s.name as shop_name
          FROM billing b
          JOIN shops s ON b.shop_id = s.id
-         WHERE payment_intent_id = $1`,
+         WHERE stripe_payment_intent_id = $1`,
         [paymentIntent.id]
       );
 
@@ -479,10 +477,10 @@ router.get('/history/:shopId', authenticateToken, async (req, res) => {
     // Get payment history
     const result = await pool.query(
       `SELECT b.*,
-              CASE WHEN b.payment_intent_id IS NOT NULL THEN 'online' ELSE 'manual' END as payment_type
+              CASE WHEN b.stripe_payment_intent_id IS NOT NULL THEN 'online' ELSE 'manual' END as payment_type
        FROM billing b
        WHERE b.shop_id = $1 AND b.status = 'paid'
-       ORDER BY b.payment_date DESC
+       ORDER BY b.paid_at DESC
        LIMIT 50`,
       [shopId]
     );

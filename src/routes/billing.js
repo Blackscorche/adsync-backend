@@ -224,8 +224,8 @@ router.post('/shops/:shopId/generate-invoice', authenticateToken, requireRole(['
     const existingBill = await pool.query(
       `SELECT id FROM billing
        WHERE shop_id = $1
-       AND EXTRACT(MONTH FROM billing_period_start) = $2
-       AND EXTRACT(YEAR FROM billing_period_start) = $3`,
+       AND EXTRACT(MONTH FROM billing_month) = $2
+       AND EXTRACT(YEAR FROM billing_month) = $3`,
       [shopId, month, year]
     );
 
@@ -235,18 +235,24 @@ router.post('/shops/:shopId/generate-invoice', authenticateToken, requireRole(['
 
     // Create bill record
     const invoiceNumber = `INV-${shop.id}-${year}${String(month).padStart(2, '0')}`;
+    const dueDate = new Date(endDate.getTime() + 14 * 24 * 60 * 60 * 1000); // 14 days payment terms
 
     const billResult = await pool.query(
       `INSERT INTO billing (
-        shop_id, invoice_number, billing_period_start, billing_period_end,
-        screen_charges, content_charges, additional_charges, subtotal,
-        vat_amount, total_amount, status, due_date
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        shop_id, invoice_number, bill_date, billing_month,
+        amount, total_amount, status, due_date, description
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *`,
       [
-        shopId, invoiceNumber, startDate, endDate,
-        screenCharges, contentCharges, 0, subtotal,
-        vat, total, 'pending', new Date(endDate.getTime() + 14 * 24 * 60 * 60 * 1000) // 14 days payment terms
+        shopId,
+        invoiceNumber,
+        new Date(), // bill_date is today
+        startDate, // billing_month is the month being billed
+        total, // amount
+        total, // total_amount
+        'pending',
+        dueDate,
+        `Screens: £${screenCharges.toFixed(2)}, Content: £${contentCharges.toFixed(2)}, VAT: £${vat.toFixed(2)}`
       ]
     );
 
@@ -303,10 +309,22 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
 
     // Create PDF
     const doc = new PDFDocument();
-    const filename = `${bill.invoice_number}.pdf`;
+    const filename = `${bill.invoice_number || 'invoice'}.pdf`;
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    // Handle stream errors before piping
+    doc.on('error', (err) => {
+      console.error('PDF generation error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'PDF generation failed' });
+      }
+    });
+
+    res.on('error', (err) => {
+      console.error('Response stream error:', err);
+    });
 
     doc.pipe(res);
 
@@ -332,10 +350,14 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
 
     // Billing period
     doc.fontSize(12).text('Billing Period:', 50, 280);
-    doc.fontSize(10).text(
-      `${new Date(bill.billing_period_start).toLocaleDateString()} - ${new Date(bill.billing_period_end).toLocaleDateString()}`,
-      50, 300
-    );
+    const billingDate = bill.billing_month || bill.bill_date;
+    if (billingDate) {
+      const date = new Date(billingDate);
+      doc.fontSize(10).text(
+        `${date.toLocaleDateString('default', { month: 'long', year: 'numeric' })}`,
+        50, 300
+      );
+    }
 
     // Line items
     doc.fontSize(12).text('Description', 50, 340);
@@ -343,30 +365,19 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
 
     let yPosition = 360;
 
-    if (bill.screen_charges > 0) {
-      doc.fontSize(10).text('Screen Subscription Charges', 50, yPosition);
-      doc.text(`£${bill.screen_charges.toFixed(2)}`, 450, yPosition);
-      yPosition += 20;
+    // Use description if available, otherwise show generic billing
+    if (bill.description) {
+      doc.fontSize(10).text(bill.description, 50, yPosition);
+    } else {
+      doc.fontSize(10).text('Monthly Service Charges', 50, yPosition);
     }
 
-    if (bill.content_charges > 0) {
-      doc.fontSize(10).text('Content Upload Charges', 50, yPosition);
-      doc.text(`£${bill.content_charges.toFixed(2)}`, 450, yPosition);
-      yPosition += 20;
-    }
+    yPosition += 40;
 
-    // Totals
-    yPosition += 20;
-    doc.fontSize(10).text('Subtotal:', 380, yPosition);
-    doc.text(`£${bill.subtotal.toFixed(2)}`, 450, yPosition);
-
-    yPosition += 20;
-    doc.text('VAT (20%):', 380, yPosition);
-    doc.text(`£${bill.vat_amount.toFixed(2)}`, 450, yPosition);
-
-    yPosition += 20;
-    doc.fontSize(12).text('Total:', 380, yPosition);
-    doc.text(`£${bill.total_amount.toFixed(2)}`, 450, yPosition);
+    // Total
+    doc.fontSize(12).text('Total Amount:', 380, yPosition);
+    const totalAmount = parseFloat(bill.total_amount || bill.amount || 0);
+    doc.text(`£${totalAmount.toFixed(2)}`, 450, yPosition);
 
     // Payment status
     yPosition += 40;
@@ -380,7 +391,9 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Download invoice error:', error);
-    res.status(500).json({ error: 'Server error' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Server error' });
+    }
   }
 });
 
@@ -388,18 +401,17 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
 router.patch('/bills/:billId/payment', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const { billId } = req.params;
-    const { status, payment_method, payment_reference, payment_date } = req.body;
+    const { status, payment_method, payment_date } = req.body;
 
     const result = await pool.query(
       `UPDATE billing
        SET status = $1,
            payment_method = $2,
-           payment_reference = $3,
-           payment_date = $4,
+           paid_at = $3,
            updated_at = NOW()
-       WHERE id = $5
+       WHERE id = $4
        RETURNING *`,
-      [status, payment_method, payment_reference, payment_date || new Date(), billId]
+      [status, payment_method, payment_date || new Date(), billId]
     );
 
     if (result.rows.length === 0) {
@@ -438,6 +450,74 @@ router.get('/unpaid', authenticateToken, requireRole(['admin']), async (req, res
 
   } catch (error) {
     console.error('Get unpaid bills error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get all bills (Admin only)
+router.get('/all', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const { status, shopId, month, year } = req.query;
+
+    let query = `
+      SELECT b.*, s.name as shop_name, u.full_name as owner_name, u.email as owner_email
+      FROM billing b
+      JOIN shops s ON b.shop_id = s.id
+      JOIN users u ON s.owner_id = u.id
+      WHERE 1=1
+    `;
+
+    const params = [];
+    let paramIndex = 1;
+
+    if (status && status !== 'all') {
+      query += ` AND b.status = $${paramIndex++}`;
+      params.push(status);
+    }
+
+    if (shopId) {
+      query += ` AND b.shop_id = $${paramIndex++}`;
+      params.push(shopId);
+    }
+
+    if (month) {
+      query += ` AND EXTRACT(MONTH FROM b.billing_month) = $${paramIndex++}`;
+      params.push(month);
+    }
+
+    if (year) {
+      query += ` AND EXTRACT(YEAR FROM b.billing_month) = $${paramIndex++}`;
+      params.push(year);
+    }
+
+    query += ' ORDER BY b.created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+
+  } catch (error) {
+    console.error('Get all bills error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get overdue bills (Admin only)
+router.get('/overdue', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT b.*, s.name as shop_name, u.full_name as owner_name, u.email as owner_email,
+              DATE_PART('day', NOW() - b.due_date) as days_overdue
+       FROM billing b
+       JOIN shops s ON b.shop_id = s.id
+       JOIN users u ON s.owner_id = u.id
+       WHERE b.status = 'pending' AND b.due_date < CURRENT_DATE
+       ORDER BY b.due_date ASC`
+    );
+
+    res.json(result.rows);
+
+  } catch (error) {
+    console.error('Get overdue bills error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
