@@ -18,22 +18,18 @@ app.use(cors({
   origin: function(origin, callback) {
     if (!origin) return callback(null, true);
 
-    const allowedOrigins = [
-      process.env.FRONTEND_URL || 'http://localhost:3000',
-      'http://localhost:19006', // Expo web
-      'http://localhost:8081', // React Native packager
-      'exp://192.168', // Expo client on local network
-    ];
+    // Parse multiple frontend URLs from environment variable
+    const allowedOrigins = process.env.FRONTEND_URLS
+      ? process.env.FRONTEND_URLS.split(',').map(url => url.trim())
+      : ['http://localhost:3000'];
 
-    // Allow any origin that matches our patterns
-    if (allowedOrigins.some(allowed => origin.startsWith(allowed)) ||
-        origin.includes('localhost') ||
-        origin.includes('192.168') ||
-        origin.includes('10.0.2')) {
-      callback(null, true);
-    } else {
-      callback(null, true); // For now, allow all origins for mobile app testing
-    }
+    // Check if origin is allowed
+    const isAllowed = allowedOrigins.some(allowed => origin === allowed) ||
+                     origin.includes('localhost') || // Allow all localhost for development
+                     origin.includes('10.0.2') ||    // Allow Android emulator
+                     origin.startsWith('exp://');    // Allow Expo client
+
+    callback(null, isAllowed);
   },
   credentials: true
 }));

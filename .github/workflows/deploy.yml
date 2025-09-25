@@ -30,7 +30,7 @@ jobs:
         JWT_SECRET=${{ secrets.JWT_SECRET }}
         PORT=${{ secrets.PORT }}
         NODE_ENV=production
-        FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+        FRONTEND_URLS=${{ secrets.FRONTEND_URLS }}
         IDEAL_POSTCODES_API_KEY=${{ secrets.IDEAL_POSTCODES_API_KEY }}
         STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
         STRIPE_PUBLISHABLE_KEY=${{ secrets.STRIPE_PUBLISHABLE_KEY }}
