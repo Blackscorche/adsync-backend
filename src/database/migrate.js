@@ -970,6 +970,38 @@ const migrations = [
         DROP COLUMN IF EXISTS total_amount
       `);
     }
+  },
+  {
+    version: 16,
+    name: 'Add sales role to users table constraint',
+    up: async (client) => {
+      // Update the role constraint to include 'sales'
+      await client.query(`
+        ALTER TABLE users
+        DROP CONSTRAINT IF EXISTS users_role_check
+      `);
+
+      await client.query(`
+        ALTER TABLE users
+        ADD CONSTRAINT users_role_check
+        CHECK (role IN ('admin', 'design', 'owner', 'sales'))
+      `);
+
+      console.log('✅ Added sales role to users table constraint');
+    },
+    down: async (client) => {
+      // Revert back to original constraint
+      await client.query(`
+        ALTER TABLE users
+        DROP CONSTRAINT IF EXISTS users_role_check
+      `);
+
+      await client.query(`
+        ALTER TABLE users
+        ADD CONSTRAINT users_role_check
+        CHECK (role IN ('admin', 'design', 'owner'))
+      `);
+    }
   }
 ];
 
