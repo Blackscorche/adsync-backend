@@ -1,0 +1,99 @@
+name: Deploy Backend to Digital Ocean
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Create production environment file
+      run: |
+        cat > .env.production << EOF
+        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        JWT_SECRET=${{ secrets.JWT_SECRET }}
+        PORT=${{ secrets.PORT }}
+        NODE_ENV=production
+        FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+        IDEAL_POSTCODES_API_KEY=${{ secrets.IDEAL_POSTCODES_API_KEY }}
+        STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
+        STRIPE_PUBLISHABLE_KEY=${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+        EOF
+
+    - name: Deploy to Digital Ocean
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.DO_HOST }}
+        username: ${{ secrets.DO_USERNAME }}
+        key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+        port: 22
+        source: "src/,package.json,package-lock.json,.env.production"
+        target: "/var/www/ivaa-adsync-backend/"
+        strip_components: 0
+        timeout: 120s
+        debug: true
+
+    - name: Install dependencies and restart application
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.DO_HOST }}
+        username: ${{ secrets.DO_USERNAME }}
+        key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+        port: 22
+        timeout: 120s
+        debug: true
+        script: |
+          set -e
+          cd /var/www/ivaa-adsync-backend
+
+          # Copy production env file
+          if [ -f ".env.production" ]; then
+            cp .env.production .env
+          else
+            echo "Warning: .env.production not found"
+          fi
+
+          # Install Node.js if not present
+          if ! command -v node &> /dev/null; then
+            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+            sudo apt-get install -y nodejs
+          fi
+
+          # Install production dependencies
+          npm ci --only=production
+
+          # Create uploads directory if it doesn't exist
+          mkdir -p uploads
+
+          # Set proper permissions
+          chmod -R 755 src/
+          chmod -R 755 uploads/
+
+          # Install PM2 if not present
+          if ! command -v pm2 &> /dev/null; then
+            npm install -g pm2
+          fi
+
+          # Restart application using PM2
+          pm2 restart ivaa-backend || pm2 start src/index.js --name "ivaa-backend" --time
+
+          # Show PM2 status
+          pm2 list
