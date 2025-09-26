@@ -95,11 +95,9 @@ const staticCors = (req, res, next) => {
   next();
 };
 
-// Static file serving for uploaded content with CORS
-app.use('/uploads/content', staticCors, express.static(path.join(__dirname, '../uploads/content')));
-app.use('/uploads/thumbnails', staticCors, express.static(path.join(__dirname, '../uploads/thumbnails')));
-app.use('/uploads/shops', staticCors, express.static(path.join(__dirname, '../uploads/shops')));
-app.use('/uploads/tickets', staticCors, express.static(path.join(__dirname, '../uploads/tickets')));
+// Static file serving is now handled by DigitalOcean Spaces + CDN
+// Keep logo serving for backward compatibility
+app.use('/uploads', staticCors, express.static(path.join(__dirname, '../uploads')));
 
 // Routes with specific rate limiters
 app.use('/api/auth', authLimiter, require('./routes/auth'));

@@ -2,42 +2,9 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const { shopUpload, getFileUrl, deleteFile, getKeyFromUrl } = require('../services/digitalOceanSpaces');
 
 const router = express.Router();
-
-// Configure multer for shop photo uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, '../../uploads/shops');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'shop-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({
-  storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|webp/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-
-    if (mimetype && extname) {
-      return cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed'));
-    }
-  }
-});
 
 // Get sales dashboard data
 router.get('/dashboard', authenticateToken, requireRole(['sales']), async (req, res) => {
@@ -111,7 +78,7 @@ router.get('/dashboard', authenticateToken, requireRole(['sales']), async (req, 
 router.post('/register-shop',
   authenticateToken,
   requireRole(['sales']),
-  upload.single('shopPhoto'),
+  shopUpload.single('shopPhoto'),
   async (req, res) => {
     try {
       const {
@@ -167,7 +134,7 @@ router.post('/register-shop',
         const ownerId = ownerResult.rows[0].id;
 
         // Handle shop photo
-        const photoUrl = req.file ? `/uploads/shops/${req.file.filename}` : null;
+        const photoUrl = req.file ? getFileUrl(req.file.key) : null;
 
         // Create shop (pending approval)
         const shopResult = await pool.query(

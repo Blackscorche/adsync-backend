@@ -1,54 +1,10 @@
 const express = require('express');
-const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { contentUpload, deleteFile, getFileUrl, getKeyFromUrl } = require('../services/digitalOceanSpaces');
 
 const router = express.Router();
-
-// Create uploads directory if it doesn't exist
-const uploadsDir = path.join(__dirname, '../../uploads');
-const contentDir = path.join(uploadsDir, 'content');
-const thumbnailsDir = path.join(uploadsDir, 'thumbnails');
-
-[contentDir, thumbnailsDir].forEach(dir => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-});
-
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, contentDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueId = uuidv4();
-    const ext = path.extname(file.originalname);
-    cb(null, `${uniqueId}${ext}`);
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: 100 * 1024 * 1024 // 100MB max
-  },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|mp4|avi|mov|pdf/;
-    const ext = path.extname(file.originalname).toLowerCase();
-    const mimeType = allowedTypes.test(file.mimetype);
-    const extName = allowedTypes.test(ext);
-
-    if (mimeType && extName) {
-      return cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only images, videos, and PDFs are allowed.'));
-    }
-  }
-});
 
 // Get all content for a shop (owner) or all content (admin/design)
 router.get('/', authenticateToken, async (req, res) => {
@@ -111,7 +67,7 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // Upload content (owner only)
-router.post('/upload', authenticateToken, requireRole(['owner']), upload.single('file'), async (req, res) => {
+router.post('/upload', authenticateToken, requireRole(['owner']), contentUpload.single('file'), async (req, res) => {
   const client = await pool.connect();
 
   try {
@@ -131,7 +87,8 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
     );
 
     if (shopResult.rows.length === 0) {
-      fs.unlinkSync(req.file.path);
+      // Delete file from Spaces if shop not found
+      await deleteFile(req.file.key);
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Shop not found for this owner' });
     }
@@ -140,7 +97,8 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
 
     // Check if shop is active
     if (shop.payment_status !== 'active') {
-      fs.unlinkSync(req.file.path);
+      // Delete file from Spaces if shop inactive
+      await deleteFile(req.file.key);
       await client.query('ROLLBACK');
       return res.status(403).json({
         error: 'Shop is inactive. Please pay outstanding bills to continue.',
@@ -177,7 +135,7 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
     } else {
       // This is a paid upload - check credit balance
       if (shop.credit_balance < UPLOAD_COST) {
-        fs.unlinkSync(req.file.path);
+        await deleteFile(req.file.key);
         await client.query('ROLLBACK');
         return res.status(402).json({
           error: 'Insufficient credit balance. Please top up to continue.',
@@ -194,7 +152,7 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
       );
 
       if (!deductResult.rows[0].success) {
-        fs.unlinkSync(req.file.path);
+        await deleteFile(req.file.key);
         await client.query('ROLLBACK');
         return res.status(402).json({
           error: 'Failed to deduct credit. Please try again.',
@@ -244,9 +202,8 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
       fileType = 'pdf';
     }
 
-    // Create file URL
-    const fileUrl = `/uploads/content/${req.file.filename}`;
-    const thumbnailUrl = `/uploads/thumbnails/${req.file.filename}`;
+    // Create file URL using CDN
+    const fileUrl = getFileUrl(req.file.key);
 
     // Insert content record with charge information
     const result = await client.query(
@@ -287,8 +244,8 @@ router.post('/upload', authenticateToken, requireRole(['owner']), upload.single(
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error uploading content:', error);
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+    if (req.file && req.file.key) {
+      await deleteFile(req.file.key);
     }
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -347,7 +304,7 @@ router.patch('/:id/start-design', authenticateToken, requireRole(['design']), as
 });
 
 // Designer uploads edited version
-router.post('/:id/upload-design', authenticateToken, requireRole(['design']), upload.single('file'), async (req, res) => {
+router.post('/:id/upload-design', authenticateToken, requireRole(['design']), contentUpload.single('file'), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -365,7 +322,7 @@ router.post('/:id/upload-design', authenticateToken, requireRole(['design']), up
     );
 
     if (accessCheck.rows.length === 0) {
-      fs.unlinkSync(req.file.path);
+      await deleteFile(req.file.key);
       return res.status(404).json({ error: 'Content not found' });
     }
 
@@ -373,17 +330,17 @@ router.post('/:id/upload-design', authenticateToken, requireRole(['design']), up
 
     // Verify designer is assigned to this shop
     if (content.designer_id !== req.user.userId) {
-      fs.unlinkSync(req.file.path);
+      await deleteFile(req.file.key);
       return res.status(403).json({ error: 'You are not assigned to this shop' });
     }
 
     // Verify content is in in_design status
     if (content.status !== 'in_design') {
-      fs.unlinkSync(req.file.path);
+      await deleteFile(req.file.key);
       return res.status(400).json({ error: 'Content must be in design phase. Please click "Start Design" first.' });
     }
 
-    const fileUrl = `/uploads/content/${req.file.filename}`;
+    const fileUrl = getFileUrl(req.file.key);
 
     const result = await pool.query(
       `UPDATE content
@@ -402,8 +359,8 @@ router.post('/:id/upload-design', authenticateToken, requireRole(['design']), up
     });
   } catch (error) {
     console.error('Error uploading design:', error);
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+    if (req.file && req.file.key) {
+      await deleteFile(req.file.key);
     }
     res.status(500).json({ error: 'Server error' });
   }
@@ -541,11 +498,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Delete file from filesystem (remove /api prefix from path)
-    const relativePath = content.file_url.replace('/api', '');
-    const filePath = path.join(__dirname, '../..', relativePath);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
+    // Delete file from DigitalOcean Spaces
+    const fileKey = getKeyFromUrl(content.file_url);
+    if (fileKey) {
+      await deleteFile(fileKey);
     }
 
     // Delete from database

@@ -12,6 +12,8 @@
     "db:seed": "node src/database/seed.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.896.0",
+    "@aws-sdk/lib-storage": "^3.896.0",
     "axios": "^1.12.1",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -22,6 +24,7 @@
     "helmet": "^7.0.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
+    "multer-s3": "^3.0.1",
     "node-cron": "^3.0.3",
     "pdfkit": "^0.13.0",
     "pg": "^8.11.3",

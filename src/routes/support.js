@@ -1,40 +1,9 @@
 const express = require('express');
 const pool = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs').promises;
+const { ticketUpload, getFileUrl, deleteFile, getKeyFromUrl } = require('../services/digitalOceanSpaces');
 
 const router = express.Router();
-
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: async (req, file, cb) => {
-    const uploadDir = path.join(__dirname, '../../uploads/tickets');
-    await fs.mkdir(uploadDir, { recursive: true });
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|txt/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-
-    if (mimetype && extname) {
-      return cb(null, true);
-    } else {
-      cb(new Error('Invalid file type'));
-    }
-  }
-});
 
 // Generate unique ticket number
 function generateTicketNumber() {
@@ -46,7 +15,7 @@ function generateTicketNumber() {
 }
 
 // Create new ticket (for owners)
-router.post('/create', authenticateToken, upload.array('attachments', 5), async (req, res) => {
+router.post('/create', authenticateToken, ticketUpload.array('attachments', 5), async (req, res) => {
   try {
     const userId = req.user.userId;
     const {
@@ -108,7 +77,7 @@ router.post('/create', authenticateToken, upload.array('attachments', 5), async 
           [
             ticket.id,
             file.originalname,
-            `/uploads/tickets/${file.filename}`,
+            getFileUrl(file.key),
             file.size,
             file.mimetype,
             userId
@@ -317,7 +286,7 @@ router.get('/:ticketId', authenticateToken, async (req, res) => {
 });
 
 // Add comment to ticket
-router.post('/:ticketId/comment', authenticateToken, upload.array('attachments', 3), async (req, res) => {
+router.post('/:ticketId/comment', authenticateToken, ticketUpload.array('attachments', 3), async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { comment, is_internal } = req.body;
@@ -354,7 +323,7 @@ router.post('/:ticketId/comment', authenticateToken, upload.array('attachments',
             ticketId,
             newComment.id,
             file.originalname,
-            `/uploads/tickets/${file.filename}`,
+            getFileUrl(file.key),
             file.size,
             file.mimetype,
             userId
