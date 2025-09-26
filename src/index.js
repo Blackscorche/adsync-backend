@@ -34,6 +34,11 @@ app.use(cors({
   credentials: true
 }));
 
+// Trust proxy for production (to handle X-Forwarded-For headers)
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Rate limiting - Different limits for different endpoints
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
