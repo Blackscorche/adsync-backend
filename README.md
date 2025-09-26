@@ -16,6 +16,13 @@ npm install
 ```
 
 ### 2. Database Setup
+
+#### Option A: Complete Schema Setup (Recommended for new installations)
+```bash
+npm run db:setup
+```
+
+#### Option B: Manual PostgreSQL Setup
 Create a PostgreSQL database:
 ```sql
 CREATE DATABASE ivaa_adsync;
@@ -24,6 +31,15 @@ CREATE DATABASE ivaa_adsync;
 Run the schema:
 ```bash
 psql -U postgres -d ivaa_adsync -f src/database/schema.sql
+```
+
+#### Option C: Migration System (For updates)
+```bash
+# Check migration status
+npm run db:migrate:status
+
+# Apply pending migrations
+npm run db:migrate
 ```
 
 ### 3. Environment Variables
@@ -99,6 +115,50 @@ src/
 3. Enable SSL for database connection
 4. Set up proper logging
 5. Configure rate limiting
+
+## Troubleshooting
+
+### SSL Certificate Issues (DigitalOcean Managed Databases)
+If you encounter SSL certificate errors like `self-signed certificate in certificate chain`:
+
+#### Method 1: Environment Variable (Recommended for development)
+```bash
+NODE_TLS_REJECT_UNAUTHORIZED=0 NODE_ENV=production npm run db:setup
+NODE_TLS_REJECT_UNAUTHORIZED=0 NODE_ENV=production npm run db:migrate
+```
+
+#### Method 2: Update DATABASE_URL (Recommended for production)
+Add SSL parameters to your DATABASE_URL:
+```bash
+DATABASE_URL=postgresql://user:pass@host:port/db?sslmode=require&sslcert=&sslkey=&sslrootcert=
+```
+
+#### Method 3: Use DigitalOcean CA Certificate
+1. Download DigitalOcean's CA certificate:
+```bash
+wget https://docs.digitalocean.com/assets/ca-certificate.crt
+```
+
+2. Update DATABASE_URL:
+```bash
+DATABASE_URL=postgresql://user:pass@host:port/db?sslmode=require&sslrootcert=./ca-certificate.crt
+```
+
+### Database Migration Files
+The project uses SQL-based migrations for better maintainability:
+
+- **Initial setup**: `src/database/schema.sql` (complete schema)
+- **Updates**: `src/database/migrations/001_description.sql` (incremental changes)
+
+Migration file naming convention: `{number}_{description}.sql`
+
+Example:
+```
+migrations/
+├── 001_add_user_avatar.sql
+├── 002_add_shop_settings.sql
+└── 003_update_pricing.sql
+```
 
 ## Support
 For issues or questions, contact the development team.
