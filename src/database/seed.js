@@ -17,10 +17,10 @@ async function seedDatabase() {
       const hashedPassword = await bcrypt.hash(user.password, 10);
 
       const result = await pool.query(
-        `INSERT INTO users (email, password, full_name, role)
+        `INSERT INTO users (email, password_hash, full_name, role)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (email)
-         DO UPDATE SET password = $2, full_name = $3, role = $4
+         DO UPDATE SET password_hash = $2, full_name = $3, role = $4
          RETURNING id, email, role`,
         [user.email, hashedPassword, user.name, user.role]
       );
