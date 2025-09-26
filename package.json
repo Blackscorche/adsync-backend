@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
+    "db:setup": "node src/database/setup.js",
     "db:migrate": "node src/database/migrate.js",
+    "db:migrate:status": "node src/database/migrate.js status",
     "db:rollback": "node src/database/migrate.js rollback",
-    "db:reset": "node src/database/migrate.js reset",
     "db:seed": "node src/database/seed.js"
   },
   "dependencies": {
