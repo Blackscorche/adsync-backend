@@ -34,6 +34,12 @@ jobs:
         IDEAL_POSTCODES_API_KEY=${{ secrets.IDEAL_POSTCODES_API_KEY }}
         STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
         STRIPE_PUBLISHABLE_KEY=${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+        DO_SPACES_ENDPOINT=${{ secrets.DO_SPACES_ENDPOINT }}
+        DO_SPACES_REGION=${{ secrets.DO_SPACES_REGION }}
+        DO_SPACES_BUCKET=${{ secrets.DO_SPACES_BUCKET }}
+        DO_SPACES_KEY=${{ secrets.DO_SPACES_KEY }}
+        DO_SPACES_SECRET=${{ secrets.DO_SPACES_SECRET }}
+        DO_SPACES_CDN_URL=${{ secrets.DO_SPACES_CDN_URL }}
         EOF
 
     - name: Deploy to Digital Ocean
