@@ -34,38 +34,23 @@ app.use(cors({
   credentials: true
 }));
 
-// Trust proxy settings for production
-if (process.env.NODE_ENV === 'production') {
-  app.set('trust proxy', 1);
-}
-
 // Rate limiting - Different limits for different endpoints
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000, // Increased to 1000 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-  // Handle proxy headers correctly
-  trustProxy: process.env.NODE_ENV === 'production'
+  message: 'Too many requests from this IP, please try again later.'
 });
 
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 50, // 50 uploads per 15 minutes
-  message: 'Too many uploads from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-  trustProxy: process.env.NODE_ENV === 'production'
+  message: 'Too many uploads from this IP, please try again later.'
 });
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // 10 login attempts per 15 minutes
-  message: 'Too many login attempts from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-  trustProxy: process.env.NODE_ENV === 'production'
+  message: 'Too many login attempts from this IP, please try again later.'
 });
 
 // Mobile-specific rate limiter - more lenient for heartbeats
@@ -76,7 +61,6 @@ const mobileLimiter = rateLimit({
   skipSuccessfulRequests: false,
   standardHeaders: true,
   legacyHeaders: false,
-  trustProxy: process.env.NODE_ENV === 'production'
 });
 
 // Heartbeat-specific rate limiter - very lenient
@@ -87,7 +71,6 @@ const heartbeatLimiter = rateLimit({
   skipFailedRequests: true, // Don't count failed requests
   standardHeaders: true,
   legacyHeaders: false,
-  trustProxy: process.env.NODE_ENV === 'production'
 });
 
 // Apply general limiter to all API routes EXCEPT mobile

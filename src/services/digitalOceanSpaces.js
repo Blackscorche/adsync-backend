@@ -5,14 +5,6 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 
 // Configure DigitalOcean Spaces with AWS SDK v3
-console.log('DigitalOcean Spaces Config:', {
-  endpoint: `https://${process.env.DO_SPACES_ENDPOINT}`,
-  accessKeyId: process.env.DO_SPACES_KEY ? `${process.env.DO_SPACES_KEY.substring(0, 4)}...` : 'MISSING',
-  secretAccessKey: process.env.DO_SPACES_SECRET ? 'SET' : 'MISSING',
-  region: process.env.DO_SPACES_REGION,
-  bucket: process.env.DO_SPACES_BUCKET
-});
-
 const s3 = new S3Client({
   endpoint: `https://${process.env.DO_SPACES_ENDPOINT}`,
   credentials: {
@@ -193,31 +185,6 @@ const getKeyFromUrl = (url) => {
   return url;
 };
 
-// Test connection function
-const testConnection = async () => {
-  try {
-    const { ListObjectsV2Command } = require('@aws-sdk/client-s3');
-    const params = {
-      Bucket: process.env.DO_SPACES_BUCKET,
-      MaxKeys: 1
-    };
-
-    await s3.send(new ListObjectsV2Command(params));
-    console.log('✅ DigitalOcean Spaces connection successful');
-    return true;
-  } catch (error) {
-    console.error('❌ DigitalOcean Spaces connection failed:', error.message);
-    console.error('Error details:', {
-      code: error.Code,
-      message: error.message,
-      name: error.name
-    });
-    return false;
-  }
-};
-
-// Test connection on module load
-testConnection();
 
 module.exports = {
   contentUpload,
