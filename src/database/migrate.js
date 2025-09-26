@@ -441,6 +441,38 @@ const migrations = [
     }
   },
 
+  // Migration 7: Create system_settings table
+  {
+    version: 7,
+    name: 'create_system_settings',
+    up: async (client) => {
+      // Create system_settings table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS system_settings (
+          id SERIAL PRIMARY KEY,
+          setting_key VARCHAR(255) UNIQUE NOT NULL,
+          setting_value TEXT,
+          description TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Insert default system settings
+      await client.query(`
+        INSERT INTO system_settings (setting_key, setting_value, description)
+        VALUES
+          ('app_name', 'IVAA AdSync', 'Application name'),
+          ('app_version', '1.0.0', 'Application version'),
+          ('maintenance_mode', 'false', 'Maintenance mode status')
+        ON CONFLICT (setting_key) DO NOTHING
+      `);
+    },
+    down: async (client) => {
+      await client.query('DROP TABLE IF EXISTS system_settings');
+    }
+  },
+
   // Migration 8: Add configurable pricing settings and dynamic screen types
   {
     version: 8,
