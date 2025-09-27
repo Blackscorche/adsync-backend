@@ -3,7 +3,8 @@
 -- Based on live database schema as of 2025-09-26
 
 -- Drop existing tables if they exist (for clean setup)
-DROP TABLE IF EXISTS ticket_messages CASCADE;
+DROP TABLE IF EXISTS ticket_attachments CASCADE;
+DROP TABLE IF EXISTS ticket_comments CASCADE;
 DROP TABLE IF EXISTS support_tickets CASCADE;
 DROP TABLE IF EXISTS screen_playlists CASCADE;
 DROP TABLE IF EXISTS playlist_items CASCADE;
@@ -258,22 +259,50 @@ CREATE TABLE notifications (
 -- Create support_tickets table
 CREATE TABLE support_tickets (
     id SERIAL PRIMARY KEY,
+    ticket_number VARCHAR(50) UNIQUE NOT NULL,
     shop_id INTEGER REFERENCES shops(id),
+    created_by INTEGER REFERENCES users(id),
+    assigned_to INTEGER REFERENCES users(id),
+    category VARCHAR(50) NOT NULL,
+    priority VARCHAR(20) DEFAULT 'medium',
     subject VARCHAR(255) NOT NULL,
     description TEXT NOT NULL,
     status VARCHAR(50) DEFAULT 'open',
-    priority VARCHAR(20) DEFAULT 'normal',
+    -- Screen request fields
+    screen_size VARCHAR(20),
+    screen_quantity INTEGER,
+    installation_address TEXT,
+    preferred_installation_date DATE,
+    -- Content request fields
+    content_type VARCHAR(50),
+    play_duration INTEGER,
+    target_screens TEXT[],
+    start_date DATE,
+    end_date DATE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create ticket_messages table
-CREATE TABLE ticket_messages (
+-- Create ticket_comments table
+CREATE TABLE ticket_comments (
     id SERIAL PRIMARY KEY,
     ticket_id INTEGER REFERENCES support_tickets(id),
     user_id INTEGER REFERENCES users(id),
-    message TEXT NOT NULL,
-    attachment TEXT,
+    comment TEXT NOT NULL,
+    is_internal BOOLEAN DEFAULT false,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create ticket_attachments table
+CREATE TABLE ticket_attachments (
+    id SERIAL PRIMARY KEY,
+    ticket_id INTEGER REFERENCES support_tickets(id),
+    comment_id INTEGER REFERENCES ticket_comments(id),
+    filename VARCHAR(255) NOT NULL,
+    file_url VARCHAR(500) NOT NULL,
+    file_size INTEGER,
+    mime_type VARCHAR(100),
+    uploaded_by INTEGER REFERENCES users(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -288,6 +317,13 @@ CREATE TABLE system_settings (
 -- Create migrations table for tracking
 CREATE TABLE migrations (
     version INTEGER PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create schema_migrations table for migration system compatibility
+CREATE TABLE schema_migrations (
+    version VARCHAR(255) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
