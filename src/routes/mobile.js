@@ -171,7 +171,9 @@ router.get('/playlist', async (req, res) => {
 
     if (!screen.playlist_id) {
       return res.json({
-        playlist: null,
+        id: null,
+        name: null,
+        items: [],
         message: 'No playlist assigned to this screen'
       });
     }
@@ -195,18 +197,16 @@ router.get('/playlist', async (req, res) => {
 
 
     res.json({
-      playlist: {
-        id: screen.playlist_id,
-        name: screen.playlist_name,
-        items: itemsResult.rows.map(item => ({
-          id: item.content_id.toString(),
-          title: item.title,
-          name: item.name,
-          type: item.file_type?.includes('video') ? 'video' : 'image',
-          url: `${process.env.API_BASE_URL || 'http://195.201.195.242:7000'}${item.file_url}`,
-          duration: item.duration
-        }))
-      }
+      id: screen.playlist_id,
+      name: screen.playlist_name,
+      items: itemsResult.rows.map(item => ({
+        id: item.content_id.toString(),
+        title: item.title,
+        name: item.name,
+        type: item.file_type?.includes('video') ? 'video' : 'image',
+        url: item.file_url,
+        duration: item.duration
+      }))
     });
   } catch (error) {
     console.error('ERROR fetching mobile playlist:');
