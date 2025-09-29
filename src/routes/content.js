@@ -66,6 +66,15 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+// Handle OPTIONS preflight for upload endpoint
+router.options('/upload', (req, res) => {
+  console.log('=== OPTIONS REQUEST RECEIVED ===');
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.status(200).end();
+});
+
 // Upload content (owner only)
 router.post('/upload', authenticateToken, requireRole(['owner']), contentUpload.single('file'), async (req, res) => {
   const client = await pool.connect();
@@ -232,7 +241,7 @@ router.post('/upload', authenticateToken, requireRole(['owner']), contentUpload.
 
     await client.query('COMMIT');
 
-    res.status(201).json({
+    const response = {
       message: wasFreeUpload
         ? 'Content uploaded successfully (free monthly upload)'
         : `Content uploaded successfully (£${chargeAmount.toFixed(2)} charged)`,
@@ -240,7 +249,9 @@ router.post('/upload', authenticateToken, requireRole(['owner']), contentUpload.
       credit_balance: parseFloat(updatedShopResult.rows[0].credit_balance),
       charge: chargeAmount,
       was_free: wasFreeUpload
-    });
+    };
+
+    res.status(201).json(response);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error uploading content:', error);

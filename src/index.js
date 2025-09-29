@@ -120,7 +120,6 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/api/shops', require('./routes/shops'));
 app.use('/api/screens', require('./routes/screens'));
 app.use('/api/screen-requests', require('./routes/screenRequests'));
-app.use('/api/content/upload', uploadLimiter); // Apply upload limiter specifically to upload endpoint
 app.use('/api/content', require('./routes/content'));
 app.use('/api/postcode', require('./routes/postcode'));
 app.use('/api/sales', require('./routes/sales'));
