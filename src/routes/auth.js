@@ -52,7 +52,8 @@ router.post('/login', async (req, res) => {
       { expiresIn: '24h' }
     );
 
-    res.json({
+    const response = {
+      success: true,
       token,
       user: {
         id: user.id,
@@ -61,7 +62,9 @@ router.post('/login', async (req, res) => {
         role: user.role,
         shopId: shopId
       }
-    });
+    };
+
+    res.json(response);
 
   } catch (error) {
     console.error('Login error:', error);
