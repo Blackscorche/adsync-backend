@@ -142,7 +142,6 @@ router.get('/shop/:shopId', authenticateToken, async (req, res) => {
   }
 });
 
-// Get single screen details
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const screenId = req.params.id;

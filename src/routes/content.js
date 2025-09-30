@@ -68,18 +68,17 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // Handle OPTIONS preflight for upload endpoint
 router.options('/upload', (req, res) => {
-  console.log('=== OPTIONS REQUEST RECEIVED ===');
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.status(200).end();
 });
 
-// Upload content (owner only)
 router.post('/upload', authenticateToken, requireRole(['owner']), contentUpload.single('file'), async (req, res) => {
-  const client = await pool.connect();
-
+  let client;
   try {
+    client = await pool.connect();
+
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
@@ -87,6 +86,7 @@ router.post('/upload', authenticateToken, requireRole(['owner']), contentUpload.
     await client.query('BEGIN');
 
     // Get shop details including credit balance and payment status
+    // FOR UPDATE locks the row to prevent race conditions with concurrent uploads
     const shopResult = await client.query(
       `SELECT id, credit_balance, payment_status, free_upload_used
        FROM shops
@@ -123,26 +123,22 @@ router.post('/upload', authenticateToken, requireRole(['owner']), contentUpload.
     let chargeAmount = 0;
     let wasFreeUpload = false;
 
-    // Check if this month's free upload has been used
-    const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
     const monthlyUploadResult = await client.query(
       `SELECT COUNT(*) as count
        FROM content
        WHERE shop_id = $1
-       AND created_at >= $2::date
-       AND created_at < ($2::date + interval '1 month')
+       AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
+       AND created_at < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
        AND was_free_upload = true`,
-      [shop.id, currentMonth + '-01']
+      [shop.id]
     );
 
     const hasUsedFreeUpload = parseInt(monthlyUploadResult.rows[0].count) > 0;
 
     if (!hasUsedFreeUpload) {
-      // This is the free monthly upload
       wasFreeUpload = true;
       chargeAmount = 0;
     } else {
-      // This is a paid upload - check credit balance
       if (shop.credit_balance < UPLOAD_COST) {
         await deleteFile(req.file.key);
         await client.query('ROLLBACK');
@@ -154,7 +150,6 @@ router.post('/upload', authenticateToken, requireRole(['owner']), contentUpload.
         });
       }
 
-      // Deduct credit using the stored function
       const deductResult = await client.query(
         'SELECT deduct_credit($1, $2, $3, $4) as success',
         [shop.id, UPLOAD_COST, 'upload_charge', 'Content upload']
@@ -253,14 +248,18 @@ router.post('/upload', authenticateToken, requireRole(['owner']), contentUpload.
 
     res.status(201).json(response);
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error uploading content:', error);
+    console.error('Upload error:', error.message);
+    if (client) {
+      await client.query('ROLLBACK');
+    }
     if (req.file && req.file.key) {
       await deleteFile(req.file.key);
     }
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error: ' + error.message });
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 });
 
@@ -544,32 +543,48 @@ router.get('/stats', authenticateToken, requireRole(['owner', 'admin']), async (
       shopId = req.query.shop_id;
     }
 
-    const currentMonth = new Date().toISOString().slice(0, 7);
-    
+    // Use database timezone to avoid issues
     const stats = await pool.query(
       `SELECT
-        COUNT(CASE WHEN c.created_at >= $2::date
-                    AND c.created_at < ($2::date + interval '1 month')
-                    AND c.is_extra_upload = false
-                    THEN 1 END) as monthly_uploads,
+        -- Count all uploads this month
+        COUNT(CASE WHEN c.created_at >= DATE_TRUNC('month', CURRENT_DATE)
+                    AND c.created_at < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+                    THEN 1 END) as total_uploads_this_month,
+        -- Count free uploads used this month
+        COUNT(CASE WHEN c.created_at >= DATE_TRUNC('month', CURRENT_DATE)
+                    AND c.created_at < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+                    AND c.was_free_upload = true
+                    THEN 1 END) as free_uploads_used,
+        -- Status counts
         COUNT(CASE WHEN c.status = 'pending' THEN 1 END) as pending_count,
-        COUNT(CASE WHEN c.status = 'approved' THEN 1 END) as approved_count,
-        COUNT(CASE WHEN c.status = 'rejected' THEN 1 END) as rejected_count,
-        0 as extra_uploads_remaining
+        COUNT(CASE WHEN c.status = 'in_design' OR c.status = 'designed' THEN 1 END) as in_progress_count,
+        COUNT(CASE WHEN c.status = 'approved' OR c.status = 'published' THEN 1 END) as approved_count,
+        COUNT(CASE WHEN c.status = 'rejected' THEN 1 END) as rejected_count
        FROM shops s
        LEFT JOIN content c ON s.id = c.shop_id
        WHERE s.id = $1
        GROUP BY s.id`,
-      [shopId, currentMonth + '-01']
+      [shopId]
     );
 
-    res.json(stats.rows[0] || {
-      free_uploads_limit: 1,
-      monthly_uploads: 0,
+    const result = stats.rows[0] || {
+      total_uploads_this_month: 0,
+      free_uploads_used: 0,
       pending_count: 0,
+      in_progress_count: 0,
       approved_count: 0,
-      rejected_count: 0,
-      extra_uploads_remaining: 0
+      rejected_count: 0
+    };
+
+    res.json({
+      free_uploads_limit: 1,
+      total_uploads_this_month: parseInt(result.total_uploads_this_month) || 0,
+      free_uploads_used: parseInt(result.free_uploads_used) || 0,
+      free_uploads_remaining: Math.max(0, 1 - parseInt(result.free_uploads_used || 0)),
+      pending_count: parseInt(result.pending_count) || 0,
+      in_progress_count: parseInt(result.in_progress_count) || 0,
+      approved_count: parseInt(result.approved_count) || 0,
+      rejected_count: parseInt(result.rejected_count) || 0
     });
   } catch (error) {
     console.error('Error fetching upload stats:', error);

@@ -73,22 +73,22 @@ router.get('/shops/:shopId', authenticateToken, async (req, res) => {
       [shopId, startOfMonth]
     );
 
-    // Calculate current month charges
+    const uploadPriceResult = await pool.query(
+      `SELECT setting_value FROM system_settings WHERE setting_key = 'content_upload_price'`
+    );
+    const uploadPrice = parseFloat(uploadPriceResult.rows[0]?.setting_value || 3.00);
+
     const freeUploads = 1;
-    const uploadPrice = 3.00;
     const contentUploads = parseInt(usageResult.rows[0].content_uploads);
     const billableUploads = Math.max(0, contentUploads - freeUploads);
     const contentCharges = billableUploads * uploadPrice;
 
-    // Get screen subscription charges
-    const screenCharges =
-      (shop.screen_32_count || 0) * (shop.screen_32_price || 15) +
-      (shop.screen_43_count || 0) * (shop.screen_43_price || 20) +
-      (shop.screen_55_count || 0) * (shop.screen_55_price || 25);
+    const screenCharges = screenCountsResult.rows.reduce((total, screenType) => {
+      return total + (parseInt(screenType.count) * parseFloat(screenType.monthly_price));
+    }, 0);
 
     const totalCharges = screenCharges + contentCharges;
 
-    // Get all credit transactions (purchases history)
     const transactionsResult = await pool.query(
       `SELECT * FROM credit_transactions
        WHERE shop_id = $1
@@ -96,8 +96,6 @@ router.get('/shops/:shopId', authenticateToken, async (req, res) => {
        LIMIT 50`,
       [shopId]
     );
-
-    // Get screen purchase history with screen type information
     const screenPurchasesResult = await pool.query(
       `SELECT
         s.id,
@@ -118,7 +116,6 @@ router.get('/shops/:shopId', authenticateToken, async (req, res) => {
       [shopId]
     );
 
-    // Get content purchase history (paid uploads)
     const contentPurchasesResult = await pool.query(
       `SELECT
         c.id,
@@ -139,13 +136,7 @@ router.get('/shops/:shopId', authenticateToken, async (req, res) => {
       shop: {
         id: shop.id,
         name: shop.name,
-        subscription_status: shop.subscription_status,
-        screen_32_count: shop.screen_32_count,
-        screen_43_count: shop.screen_43_count,
-        screen_55_count: shop.screen_55_count,
-        screen_32_price: shop.screen_32_price,
-        screen_43_price: shop.screen_43_price,
-        screen_55_price: shop.screen_55_price
+        subscription_status: shop.subscription_status
       },
       screenTypes: screenCountsResult.rows,
       currentMonth: {
@@ -194,7 +185,6 @@ router.post('/shops/:shopId/generate-invoice', authenticateToken, requireRole(['
     const startDate = new Date(billingMonth.getFullYear(), billingMonth.getMonth(), 1);
     const endDate = new Date(billingMonth.getFullYear(), billingMonth.getMonth() + 1, 0);
 
-    // Get content usage for the month
     const usageResult = await pool.query(
       `SELECT COUNT(*) as content_uploads
        FROM content
@@ -204,23 +194,37 @@ router.post('/shops/:shopId/generate-invoice', authenticateToken, requireRole(['
       [shopId, startDate, endDate]
     );
 
-    // Calculate charges
+    const screenCountsResult = await pool.query(
+      `SELECT
+        st.name as screen_type,
+        st.size_inches,
+        st.monthly_price,
+        COUNT(s.id) as count
+       FROM screens s
+       JOIN screen_types st ON s.screen_type_id = st.id
+       WHERE s.shop_id = $1 AND s.status = 'active'
+       GROUP BY st.id, st.name, st.size_inches, st.monthly_price
+       ORDER BY st.size_inches`,
+      [shopId]
+    );
+
+    const uploadPriceResult = await pool.query(
+      `SELECT setting_value FROM system_settings WHERE setting_key = 'content_upload_price'`
+    );
+    const uploadPrice = parseFloat(uploadPriceResult.rows[0]?.setting_value || 3.00);
+
     const freeUploads = 1;
-    const uploadPrice = 3.00;
     const contentUploads = parseInt(usageResult.rows[0].content_uploads);
     const billableUploads = Math.max(0, contentUploads - freeUploads);
     const contentCharges = billableUploads * uploadPrice;
 
-    const screenCharges =
-      (shop.screen_32_count || 0) * (shop.screen_32_price || 15) +
-      (shop.screen_43_count || 0) * (shop.screen_43_price || 20) +
-      (shop.screen_55_count || 0) * (shop.screen_55_price || 25);
+    const screenCharges = screenCountsResult.rows.reduce((total, screenType) => {
+      return total + (parseInt(screenType.count) * parseFloat(screenType.monthly_price));
+    }, 0);
 
     const subtotal = screenCharges + contentCharges;
-    const vat = subtotal * 0.20; // 20% VAT
+    const vat = subtotal * 0.20;
     const total = subtotal + vat;
-
-    // Check if invoice already exists
     const existingBill = await pool.query(
       `SELECT id FROM billing
        WHERE shop_id = $1

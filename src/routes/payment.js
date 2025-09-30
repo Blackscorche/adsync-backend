@@ -34,13 +34,7 @@ router.get('/credit/balance', authenticateToken, requireRole(['owner']), async (
     res.json({
       credit_balance: shop.credit_balance,
       payment_status: shop.payment_status,
-      transactions: transactionsResult.rows,
-      pricing: {
-        upload_cost: 3.00,
-        screen_32_monthly: 15.00,
-        screen_43_monthly: 20.00,
-        screen_55_monthly: 25.00
-      }
+      transactions: transactionsResult.rows
     });
   } catch (error) {
     console.error('Get credit balance error:', error);
