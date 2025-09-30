@@ -99,8 +99,45 @@ jobs:
             npm install -g pm2
           fi
 
-          # Restart application using PM2
-          pm2 restart ivaa-backend || pm2 start src/index.js --name "ivaa-backend" --time
+          # Create PM2 ecosystem file for proper configuration
+          cat > ecosystem.config.js << 'PM2_EOF'
+          module.exports = {
+            apps: [{
+              name: 'ivaa-backend',
+              script: './src/index.js',
+              instances: 1,
+              exec_mode: 'fork',
+              node_args: '--max-old-space-size=3072',
+              max_memory_restart: '3G',
+              env: {
+                NODE_ENV: 'production',
+                PORT: 7000
+              },
+              error_file: './logs/pm2-error.log',
+              out_file: './logs/pm2-out.log',
+              log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+              merge_logs: true,
+              autorestart: true,
+              watch: false,
+              max_restarts: 10,
+              min_uptime: '10s'
+            }]
+          }
+          PM2_EOF
+
+          # Create logs directory
+          mkdir -p logs
+
+          # Delete old PM2 process and start fresh with ecosystem config
+          pm2 delete ivaa-backend 2>/dev/null || true
+          pm2 start ecosystem.config.js
+
+          # Save PM2 configuration
+          pm2 save
+
+          # Setup PM2 to start on system reboot
+          pm2 startup systemd -u root --hp /root || true
 
           # Show PM2 status
           pm2 list
+          pm2 logs ivaa-backend --lines 20 --nostream
