@@ -77,7 +77,7 @@ router.get('/dashboard', authenticateToken, requireRole(['sales']), async (req, 
 // Register new shop with owner
 router.post('/register-shop',
   authenticateToken,
-  requireRole(['sales']),
+  requireRole(['sales', 'admin']),
   shopUpload.single('shopPhoto'),
   async (req, res) => {
     try {

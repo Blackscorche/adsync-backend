@@ -283,13 +283,13 @@ router.get('/designers', authenticateToken, requireRole(['admin']), async (req, 
   }
 });
 
-// Register new user (sales or designer)
+// Register new user (admin, sales or designer)
 router.post('/register-user', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const { email, password, full_name, role, phone } = req.body;
 
-    if (!['sales', 'design'].includes(role)) {
-      return res.status(400).json({ error: 'Invalid role. Must be sales or design.' });
+    if (!['admin', 'sales', 'design'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role. Must be admin, sales or design.' });
     }
 
     // Check if email exists
