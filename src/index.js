@@ -125,7 +125,7 @@ app.use('/api/postcode', require('./routes/postcode'));
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/design', require('./routes/design'));
 app.use('/api/notifications', require('./routes/notifications'));
-app.use('/api/support', require('./routes/support'));
+// app.use('/api/support', require('./routes/support')); // Disabled - Support feature removed
 
 // Routes for Milestone 2
 app.use('/api/playlists', require('./routes/playlists'));
