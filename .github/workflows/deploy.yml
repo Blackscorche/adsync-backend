@@ -32,9 +32,12 @@ jobs:
         NODE_ENV=production
         NODE_TLS_REJECT_UNAUTHORIZED=0
         FRONTEND_URLS=${{ secrets.FRONTEND_URLS }}
+        FRONTEND_URL=${{ secrets.FRONTEND_URL }}
         IDEAL_POSTCODES_API_KEY=${{ secrets.IDEAL_POSTCODES_API_KEY }}
         STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
         STRIPE_PUBLISHABLE_KEY=${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+        RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+        FROM_EMAIL=${{ secrets.FROM_EMAIL }}
         DO_SPACES_ENDPOINT=${{ secrets.DO_SPACES_ENDPOINT }}
         DO_SPACES_REGION=${{ secrets.DO_SPACES_REGION }}
         DO_SPACES_BUCKET=${{ secrets.DO_SPACES_BUCKET }}

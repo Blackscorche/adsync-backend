@@ -214,6 +214,143 @@ class EmailService {
       console.error('Error sending payment confirmation:', error);
     }
   }
+
+  // Send password reset email
+  async sendPasswordResetEmail(email, resetToken, userName) {
+    try {
+      const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}`;
+
+      await resend.emails.send({
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to: email,
+        subject: 'Reset Your Password - IVAA Media',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; }
+              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+              .header { text-align: center; padding: 30px 0; }
+              .logo { font-size: 28px; font-weight: bold; color: #2563eb; }
+              .content { background-color: #f9fafb; border-radius: 8px; padding: 30px; margin: 20px 0; }
+              .button { display: inline-block; background-color: #2563eb; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; margin: 20px 0; }
+              .button:hover { background-color: #1d4ed8; }
+              .footer { text-align: center; color: #6b7280; font-size: 14px; padding: 20px 0; }
+              .warning { background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; margin: 20px 0; border-radius: 4px; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <div class="logo">IVAA Media</div>
+              </div>
+
+              <div class="content">
+                <h2 style="margin-top: 0; color: #1f2937;">Reset Your Password</h2>
+                <p>Hi${userName ? ' ' + userName : ''},</p>
+                <p>We received a request to reset your password for your IVAA Media account. Click the button below to create a new password:</p>
+
+                <div style="text-align: center;">
+                  <a href="${resetUrl}" class="button">Reset Password</a>
+                </div>
+
+                <p>Or copy and paste this link into your browser:</p>
+                <p style="word-break: break-all; background-color: #e5e7eb; padding: 12px; border-radius: 4px; font-family: monospace; font-size: 12px;">${resetUrl}</p>
+
+                <div class="warning">
+                  <strong>⚠️ Important:</strong> This link will expire in 1 hour for security reasons.
+                </div>
+
+                <p style="color: #6b7280; font-size: 14px;">If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>
+              </div>
+
+              <div class="footer">
+                <p>© 2024 IVAA Media. All rights reserved.</p>
+                <p>Digital Signage Management Platform</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      });
+
+      console.log('Password reset email sent to:', email);
+      return true;
+
+    } catch (error) {
+      console.error('Error sending password reset email:', error);
+      throw error;
+    }
+  }
+
+  // Send password reset confirmation
+  async sendPasswordResetConfirmation(email, userName) {
+    try {
+      await resend.emails.send({
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to: email,
+        subject: 'Password Successfully Reset - IVAA Media',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; }
+              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+              .header { text-align: center; padding: 30px 0; }
+              .logo { font-size: 28px; font-weight: bold; color: #2563eb; }
+              .content { background-color: #f9fafb; border-radius: 8px; padding: 30px; margin: 20px 0; }
+              .success { background-color: #d1fae5; border-left: 4px solid #10b981; padding: 12px; margin: 20px 0; border-radius: 4px; }
+              .footer { text-align: center; color: #6b7280; font-size: 14px; padding: 20px 0; }
+              .button { display: inline-block; background-color: #2563eb; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; margin: 20px 0; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <div class="logo">IVAA Media</div>
+              </div>
+
+              <div class="content">
+                <h2 style="margin-top: 0; color: #1f2937;">Password Successfully Reset</h2>
+                <p>Hi${userName ? ' ' + userName : ''},</p>
+
+                <div class="success">
+                  <strong>✓ Success!</strong> Your password has been successfully reset.
+                </div>
+
+                <p>You can now log in to your IVAA Media account using your new password.</p>
+
+                <div style="text-align: center;">
+                  <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/login" class="button">Go to Login</a>
+                </div>
+
+                <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">If you didn't make this change, please contact our support team immediately.</p>
+              </div>
+
+              <div class="footer">
+                <p>© 2024 IVAA Media. All rights reserved.</p>
+                <p>Digital Signage Management Platform</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      });
+
+      console.log('Password reset confirmation sent to:', email);
+      return true;
+
+    } catch (error) {
+      console.error('Error sending password reset confirmation:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new EmailService();
