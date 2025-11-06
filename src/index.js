@@ -132,6 +132,7 @@ app.use('/api/playlists', require('./routes/playlists'));
 app.use('/api/billing', require('./routes/billing'));
 app.use('/api/payment', require('./routes/payment'));
 app.use('/api/monitoring', require('./routes/monitoring'));
+app.use('/api/ad-preferences', require('./routes/adPreferences'));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
