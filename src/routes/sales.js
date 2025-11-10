@@ -89,6 +89,7 @@ router.post('/register-shop',
         postcode,
         shopPhone,
         shopType,
+        vatNumber,
 
         // Owner details
         ownerEmail,
@@ -99,9 +100,9 @@ router.post('/register-shop',
       } = req.body;
 
       // Validate required fields
-      if (!shopName || !ownerEmail || !ownerPassword || !ownerFirstName || !ownerLastName) {
+      if (!shopName || !ownerEmail || !ownerPassword || !ownerFirstName || !ownerLastName || !vatNumber) {
         return res.status(400).json({
-          error: 'Missing required fields'
+          error: 'Missing required fields (including VAT number)'
         });
       }
 
@@ -141,13 +142,13 @@ router.post('/register-shop',
           `INSERT INTO shops (
             name, owner_id, registered_by, address, city, postcode,
             phone, shop_type, approval_status, photo_url, subscription_status,
-            commission_rate, created_at
+            commission_rate, vat_number, created_at
           )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, 'trial', 10.00, CURRENT_TIMESTAMP)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, 'trial', 10.00, $10, CURRENT_TIMESTAMP)
            RETURNING id`,
           [
             shopName, ownerId, req.user.userId, address, city,
-            postcode, shopPhone, shopType || 'retail', photoUrl
+            postcode, shopPhone, shopType || 'retail', photoUrl, vatNumber
           ]
         );
 

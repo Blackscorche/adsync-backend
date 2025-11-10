@@ -283,7 +283,7 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
 
     // Get invoice details
     const billResult = await pool.query(
-      `SELECT b.*, s.name as shop_name, s.address, s.city, s.postcode,
+      `SELECT b.*, s.name as shop_name, s.address, s.city, s.postcode, s.vat_number,
               u.full_name as owner_name, u.email as owner_email
        FROM billing b
        JOIN shops s ON b.shop_id = s.id
@@ -351,6 +351,9 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
     doc.text(bill.address, 50, 210);
     doc.text(`${bill.city}, ${bill.postcode}`, 50, 225);
     doc.text(bill.owner_email, 50, 240);
+    if (bill.vat_number) {
+      doc.text(`VAT Number: ${bill.vat_number}`, 50, 255);
+    }
 
     // Billing period
     doc.fontSize(12).text('Billing Period:', 50, 280);

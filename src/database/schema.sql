@@ -65,7 +65,8 @@ CREATE TABLE shops (
     commission_rate NUMERIC DEFAULT 10.00,
     credit_balance NUMERIC DEFAULT 0.00,
     payment_status VARCHAR(50) DEFAULT 'active',
-    free_upload_used BOOLEAN DEFAULT false
+    free_upload_used BOOLEAN DEFAULT false,
+    vat_number VARCHAR(50)
 );
 
 -- Add foreign key constraint for users.shop_id after shops table is created
