@@ -64,11 +64,11 @@ router.post('/login', async (req, res) => {
       { expiresIn: '30d' }
     );
 
-    // Update screen status to online
+    // Update screen status to active
     await pool.query(`
       UPDATE screens
       SET
-        status = 'online',
+        status = 'active',
         last_heartbeat = CURRENT_TIMESTAMP
       WHERE id = $1
     `, [screen.id]);

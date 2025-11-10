@@ -15,13 +15,10 @@ router.get('/screens', authenticateToken, requireRole(['admin']), async (req, re
         s.location,
         s.status,
         s.last_heartbeat,
-        s.current_content_id,
         sh.name as shop_name,
-        sh.address as shop_address,
-        c.original_filename as current_content
+        sh.address as shop_address
       FROM screens s
       JOIN shops sh ON s.shop_id = sh.id
-      LEFT JOIN content c ON s.current_content_id = c.id
       ORDER BY sh.name, s.name
     `);
 
@@ -34,8 +31,7 @@ router.get('/screens', authenticateToken, requireRole(['admin']), async (req, re
       status: screen.status === 'active' && screen.last_heartbeat ?
         (new Date() - new Date(screen.last_heartbeat) < 5 * 60 * 1000 ? 'online' : 'offline') :
         'offline',
-      lastSeen: screen.last_heartbeat,
-      currentContent: screen.current_content || 'No content'
+      lastSeen: screen.last_heartbeat
     }));
 
     res.json(screens);

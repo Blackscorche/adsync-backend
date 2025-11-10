@@ -120,11 +120,10 @@ router.get('/shop/:shopId', authenticateToken, async (req, res) => {
           ELSE 'offline'
         END as computed_status,
         p.name as playlist_name,
-        c.original_filename as current_content_name
+        sp.playlist_id
       FROM screens s
       LEFT JOIN screen_playlists sp ON sp.screen_id = s.id
       LEFT JOIN playlists p ON p.id = sp.playlist_id
-      LEFT JOIN content c ON c.id = s.current_content_id
       WHERE s.shop_id = $1
       ORDER BY s.name
     `, [shopId]);
@@ -465,14 +464,13 @@ router.post('/:deviceId/heartbeat', async (req, res) => {
 
     // Update screen status
     const result = await pool.query(`
-      UPDATE screens 
-      SET 
-        status = 'online',
-        last_heartbeat = CURRENT_TIMESTAMP,
-        current_content_id = $2
+      UPDATE screens
+      SET
+        status = 'active',
+        last_heartbeat = CURRENT_TIMESTAMP
       WHERE device_id = $1
       RETURNING id, shop_id
-    `, [deviceId, currentContentId]);
+    `, [deviceId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Device not registered' });
