@@ -193,6 +193,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       postcode,
       shop_type,
       phone,
+      vat_number,
       contract_start_date,
       contract_end_date,
       designer_id
@@ -232,6 +233,11 @@ router.put('/:id', authenticateToken, async (req, res) => {
       paramCount++;
       updates.push(`phone = $${paramCount}`);
       values.push(phone);
+    }
+    if (vat_number !== undefined) {
+      paramCount++;
+      updates.push(`vat_number = $${paramCount}`);
+      values.push(vat_number);
     }
     if (contract_start_date !== undefined) {
       paramCount++;
