@@ -332,20 +332,18 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
 
     doc.pipe(res);
 
-    // Define colors
-    const primaryColor = '#2563eb'; // Blue
-    const darkGray = '#374151';
-    const lightGray = '#9ca3af';
+    const primaryColor = '#2563eb';
+    const darkGray = '#1f2937';
+    const mediumGray = '#4b5563';
 
-    // ===== HEADER SECTION =====
-    // Company name with blue background
     doc.rect(0, 0, 612, 65).fill(primaryColor);
 
-    // Add logo
     const logoPath = path.join(__dirname, '../../public/assets/logo.png');
     try {
       if (fs.existsSync(logoPath)) {
+        doc.save();
         doc.image(logoPath, 50, 15, { width: 40, height: 40 });
+        doc.restore();
       }
     } catch (err) {
       console.error('Logo not found, skipping:', err.message);
@@ -359,28 +357,26 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
     doc.fillColor('#ffffff')
        .fontSize(9)
        .font('Helvetica')
-       .text('Digital Signage Solutions', 100, 46);
+       .text('A brand of Ivaa Group UK Ltd', 100, 46);
 
-    // Reset to black for rest of document
+    doc.fillColor('#ffffff')
+       .fontSize(8)
+       .text('49 Stanley Park Avenue South', 350, 15, { width: 210, align: 'right' })
+       .text('Liverpool, L4 7XB', 350, 27, { width: 210, align: 'right' })
+       .text('Company No. 16715276', 350, 39, { width: 210, align: 'right' })
+       .text('info@ivaagroup.com', 350, 51, { width: 210, align: 'right' });
+
     doc.fillColor(darkGray);
 
-    // Company details (right side)
-    doc.fontSize(8)
-       .text('123 Business Street', 400, 20, { width: 150, align: 'right' })
-       .text('London, UK', 400, 32, { width: 150, align: 'right' })
-       .text('VAT: GB123456789', 400, 44, { width: 150, align: 'right' });
-
-    // ===== INVOICE TITLE =====
     doc.fillColor(darkGray)
        .fontSize(24)
        .font('Helvetica-Bold')
        .text('INVOICE', 50, 85);
 
-    // Invoice details box
     doc.rect(400, 85, 150, 60).lineWidth(1).stroke('#e5e7eb');
 
     doc.fontSize(8)
-       .fillColor(lightGray)
+       .fillColor(mediumGray)
        .text('Invoice Number:', 410, 93)
        .text('Invoice Date:', 410, 110)
        .text('Due Date:', 410, 127);
@@ -391,7 +387,6 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
        .text(new Date(bill.created_at).toLocaleDateString('en-GB'), 485, 110, { width: 60, align: 'right' })
        .text(new Date(bill.due_date).toLocaleDateString('en-GB'), 485, 127, { width: 60, align: 'right' });
 
-    // ===== BILL TO SECTION =====
     doc.font('Helvetica-Bold')
        .fontSize(10)
        .fillColor(darkGray)
@@ -402,7 +397,7 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
        .text(bill.shop_name, 50, 180)
        .text(bill.owner_name, 50, 193)
        .fontSize(8)
-       .fillColor(lightGray)
+       .fillColor(mediumGray)
        .text(bill.address, 50, 206)
        .text(`${bill.city}, ${bill.postcode}`, 50, 218)
        .text(bill.owner_email, 50, 230);
@@ -413,7 +408,6 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
          .text(`VAT: ${bill.vat_number}`, 50, 242);
     }
 
-    // Billing period box
     const billingDate = bill.billing_month || bill.bill_date;
     if (billingDate) {
       const date = new Date(billingDate);
@@ -427,10 +421,8 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
          .text(date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }), 360, 190);
     }
 
-    // ===== LINE ITEMS TABLE =====
     let tableTop = bill.vat_number ? 275 : 265;
 
-    // Table header
     doc.rect(50, tableTop, 500, 25).fill('#f3f4f6');
     doc.fillColor(darkGray)
        .font('Helvetica-Bold')
@@ -438,7 +430,6 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
        .text('Description', 60, tableTop + 8)
        .text('Amount', 490, tableTop + 8, { width: 50, align: 'right' });
 
-    // Table content
     tableTop += 25;
     doc.rect(50, tableTop, 500, 35).stroke('#e5e7eb');
 
@@ -456,18 +447,16 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
     doc.font('Helvetica-Bold')
        .text(`£${totalAmount.toFixed(2)}`, 490, tableTop + 10, { width: 50, align: 'right' });
 
-    // ===== TOTALS SECTION =====
     tableTop += 45;
 
-    // Subtotal, VAT, Total
     doc.rect(350, tableTop, 200, 70).lineWidth(1).stroke('#e5e7eb');
 
-    const subtotal = totalAmount / 1.20; // Assuming 20% VAT
+    const subtotal = totalAmount / 1.20;
     const vatAmount = totalAmount - subtotal;
 
     doc.font('Helvetica')
        .fontSize(9)
-       .fillColor(lightGray)
+       .fillColor(mediumGray)
        .text('Subtotal:', 360, tableTop + 8)
        .text('VAT (20%):', 360, tableTop + 26);
 
@@ -475,7 +464,6 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
        .text(`£${subtotal.toFixed(2)}`, 490, tableTop + 8, { width: 50, align: 'right' })
        .text(`£${vatAmount.toFixed(2)}`, 490, tableTop + 26, { width: 50, align: 'right' });
 
-    // Total with background
     doc.rect(350, tableTop + 44, 200, 26).fill('#f3f4f6');
     doc.fillColor(darkGray)
        .font('Helvetica-Bold')
@@ -483,35 +471,36 @@ router.get('/invoices/:invoiceId/pdf', authenticateToken, async (req, res) => {
        .text('Total:', 360, tableTop + 52)
        .text(`£${totalAmount.toFixed(2)}`, 490, tableTop + 52, { width: 50, align: 'right' });
 
-    // ===== PAYMENT STATUS =====
     tableTop += 85;
     const statusColor = bill.status === 'paid' ? '#10b981' : bill.status === 'pending' ? '#f59e0b' : '#ef4444';
 
     doc.fontSize(9)
-       .fillColor(lightGray)
+       .fillColor(mediumGray)
        .text('Payment Status: ', 50, tableTop);
 
     doc.fillColor(statusColor)
        .font('Helvetica-Bold')
        .text(bill.status.toUpperCase(), 135, tableTop);
 
-    // ===== NOTES SECTION =====
     tableTop += 25;
     doc.fontSize(8)
-       .fillColor(lightGray)
+       .fillColor(mediumGray)
        .font('Helvetica')
        .text('Payment terms: Due within 30 days', 50, tableTop)
        .text('All prices include VAT at 20%', 50, tableTop + 12);
 
-    // ===== FOOTER =====
-    doc.fillColor(lightGray)
+    tableTop += 40;
+
+    doc.moveTo(50, tableTop).lineTo(550, tableTop).stroke('#e5e7eb');
+
+    tableTop += 10;
+    doc.fillColor(mediumGray)
        .font('Helvetica')
        .fontSize(8)
-       .text('Thank you for your business!', 50, 720, { align: 'center', width: 500 })
-       .text('For questions or support, please contact: support@ivaa-adsync.com', 50, 733, { align: 'center', width: 500 });
+       .text('Thank you for your business!', 50, tableTop, { align: 'center', width: 500 });
 
-    // Footer line
-    doc.moveTo(50, 710).lineTo(550, 710).stroke('#e5e7eb');
+    tableTop += 13;
+    doc.text('For questions or support, please contact: info@ivaagroup.com', 50, tableTop, { align: 'center', width: 500 });
 
     doc.end();
 
