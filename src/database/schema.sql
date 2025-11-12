@@ -94,7 +94,7 @@ CREATE TABLE screen_types (
 -- Create content table
 CREATE TABLE content (
     id SERIAL PRIMARY KEY,
-    shop_id INTEGER REFERENCES shops(id),
+    shop_id INTEGER REFERENCES shops(id) ON DELETE CASCADE,
     uploaded_by INTEGER REFERENCES users(id),
     original_filename VARCHAR(255),
     file_url VARCHAR(500),
@@ -117,7 +117,7 @@ CREATE TABLE content (
 -- Create screens table
 CREATE TABLE screens (
     id SERIAL PRIMARY KEY,
-    shop_id INTEGER REFERENCES shops(id),
+    shop_id INTEGER REFERENCES shops(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     device_id VARCHAR(255) UNIQUE,
     location VARCHAR(100),
@@ -136,7 +136,7 @@ CREATE TABLE screens (
 CREATE TABLE playlists (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    shop_id INTEGER REFERENCES shops(id),
+    shop_id INTEGER REFERENCES shops(id) ON DELETE CASCADE,
     created_by INTEGER REFERENCES users(id),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -196,7 +196,7 @@ CREATE TABLE billing (
 -- Create invoices table
 CREATE TABLE invoices (
     id SERIAL PRIMARY KEY,
-    shop_id INTEGER REFERENCES shops(id),
+    shop_id INTEGER REFERENCES shops(id) ON DELETE CASCADE,
     invoice_number VARCHAR(50) UNIQUE NOT NULL,
     screen_fees NUMERIC DEFAULT 0,
     extra_content_fees NUMERIC DEFAULT 0,
@@ -226,7 +226,7 @@ CREATE TABLE sales_commissions (
 -- Create screen_requests table
 CREATE TABLE screen_requests (
     id SERIAL PRIMARY KEY,
-    shop_id INTEGER NOT NULL REFERENCES shops(id),
+    shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
     requested_by INTEGER NOT NULL REFERENCES users(id),
     screen_name VARCHAR(255) NOT NULL,
     location VARCHAR(100),
@@ -261,7 +261,7 @@ CREATE TABLE notifications (
 CREATE TABLE support_tickets (
     id SERIAL PRIMARY KEY,
     ticket_number VARCHAR(50) UNIQUE NOT NULL,
-    shop_id INTEGER REFERENCES shops(id),
+    shop_id INTEGER REFERENCES shops(id) ON DELETE CASCADE,
     created_by INTEGER REFERENCES users(id),
     assigned_to INTEGER REFERENCES users(id),
     category VARCHAR(50) NOT NULL,

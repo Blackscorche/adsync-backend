@@ -8,7 +8,7 @@ const router = express.Router();
 router.get('/', authenticateToken, requireRole(['admin', 'design']), async (req, res) => {
   try {
     const { shop_type, city } = req.query;
-    
+
     let query = `
       SELECT
         s.id,
@@ -27,26 +27,26 @@ router.get('/', authenticateToken, requireRole(['admin', 'design']), async (req,
       LEFT JOIN users u ON s.owner_id = u.id
       LEFT JOIN screens sc ON sc.shop_id = s.id
     `;
-    
+
     const conditions = [];
     const params = [];
-    
+
     if (shop_type) {
       params.push(shop_type);
       conditions.push(`s.shop_type = $${params.length}`);
     }
-    
+
     if (city) {
       params.push(`%${city}%`);
       conditions.push(`s.address ILIKE $${params.length}`);
     }
-    
+
     if (conditions.length > 0) {
       query += ' WHERE ' + conditions.join(' AND ');
     }
-    
+
     query += ' GROUP BY s.id, u.full_name, u.email ORDER BY s.created_at DESC';
-    
+
     const result = await pool.query(query, params);
 
     res.json(result.rows);
@@ -60,14 +60,14 @@ router.get('/', authenticateToken, requireRole(['admin', 'design']), async (req,
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const shopId = req.params.id;
-    
+
     // Check access (admin can see all, owner can see own)
     if (req.user.role === 'owner' && req.user.shopId !== parseInt(shopId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
     const shopResult = await pool.query(`
-      SELECT 
+      SELECT
         s.*,
         u.full_name as owner_name,
         u.email as owner_email
@@ -257,7 +257,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     paramCount++;
     values.push(shopId);
-    
+
     const result = await pool.query(
       `UPDATE shops SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
       values
@@ -311,7 +311,7 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req, res
       [shopId]
     );
 
-    // Then delete the shop (this will cascade delete related records)
+    // Then delete the shop (CASCADE will delete all related records)
     const result = await client.query(
       'DELETE FROM shops WHERE id = $1 RETURNING id, name',
       [shopId]

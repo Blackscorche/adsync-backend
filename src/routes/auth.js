@@ -18,7 +18,7 @@ router.post('/login', async (req, res) => {
     }
 
     const result = await pool.query(
-      'SELECT id, email, password_hash, full_name, role FROM users WHERE email = $1 AND is_active = true',
+      'SELECT id, email, password_hash, full_name, role FROM users WHERE LOWER(email) = LOWER($1) AND is_active = true',
       [email]
     );
 
@@ -95,7 +95,7 @@ router.post('/register', authenticateToken, requireRole(['admin']), async (req, 
 
     // Check if email exists
     const existingUser = await pool.query(
-      'SELECT id FROM users WHERE email = $1',
+      'SELECT id FROM users WHERE LOWER(email) = LOWER($1)',
       [email]
     );
 
@@ -178,7 +178,7 @@ router.post('/forgot-password', async (req, res) => {
 
     // Check if user exists
     const result = await pool.query(
-      'SELECT id, email, full_name, is_active FROM users WHERE email = $1',
+      'SELECT id, email, full_name, is_active FROM users WHERE LOWER(email) = LOWER($1)',
       [email]
     );
 
