@@ -9,11 +9,42 @@ const router = express.Router();
 router.get('/types', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, name, size_inches, monthly_price
+      SELECT id, name, size_inches, monthly_price, shop_ids
       FROM screen_types
       WHERE is_active = true
       ORDER BY size_inches
     `);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching screen types:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get available screen types based on shop id
+router.get('/types/shop/:shopId', authenticateToken, async (req, res) => {
+  const {shopId} = req.params
+
+  if (!shopId) {
+      return res.status(400).json({ error: 'Shop ID is required' });
+  }
+
+  const id = parseInt(shopId);
+
+  if (isNaN(id)) {
+      return res.status(400).json({ error: 'Invalid Shop ID provided' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT id, name, size_inches, monthly_price, shop_ids
+      FROM screen_types
+      WHERE 
+        $1 = ANY(shop_ids)
+        AND is_active = true
+      ORDER BY size_inches
+    `,[id]);
 
     res.json(result.rows);
   } catch (error) {

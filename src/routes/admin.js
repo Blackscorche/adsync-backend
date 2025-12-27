@@ -337,13 +337,13 @@ router.get('/screen-types', authenticateToken, requireRole(['admin']), async (re
 
 router.post('/screen-types', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
-    const { name, size_inches, monthly_price } = req.body;
+    const { name, size_inches, monthly_price, shop_ids } = req.body;
 
     const result = await pool.query(
-      `INSERT INTO screen_types (name, size_inches, monthly_price)
-       VALUES ($1, $2, $3)
+      `INSERT INTO screen_types (name, size_inches, monthly_price, shop_ids)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [name, size_inches, monthly_price]
+      [name, size_inches, monthly_price, shop_ids]
     );
 
     res.json({
@@ -359,7 +359,7 @@ router.post('/screen-types', authenticateToken, requireRole(['admin']), async (r
 router.put('/screen-types/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, size_inches, monthly_price, is_active } = req.body;
+    const { name, size_inches, monthly_price, is_active, shop_ids } = req.body;
 
     const result = await pool.query(
       `UPDATE screen_types
@@ -367,10 +367,11 @@ router.put('/screen-types/:id', authenticateToken, requireRole(['admin']), async
            size_inches = COALESCE($2, size_inches),
            monthly_price = COALESCE($3, monthly_price),
            is_active = COALESCE($4, is_active),
+           shop_ids = COALESCE($6, shop_ids, ARRAY[]::integer[]),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $5
        RETURNING *`,
-      [name, size_inches, monthly_price, is_active, id]
+      [name, size_inches, monthly_price, is_active, id, shop_ids]
     );
 
     if (result.rows.length === 0) {
