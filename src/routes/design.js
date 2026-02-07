@@ -33,6 +33,7 @@ router.get('/my-shops', authenticateToken, requireRole(['design']), async (req, 
 });
 
 // Get content for a specific shop (for designers to add to playlists)
+// Removed status filter to show all content for design purposes [AND c.status IN ('approved', 'published')] <-- this comes between WHERE and ORDER BY
 router.get('/shop/:shopId/content', authenticateToken, requireRole(['design']), async (req, res) => {
   try {
     const { shopId } = req.params;
@@ -61,7 +62,6 @@ router.get('/shop/:shopId/content', authenticateToken, requireRole(['design']), 
        FROM content c
        LEFT JOIN users u ON c.uploaded_by = u.id
        WHERE c.shop_id = $1
-       AND c.status IN ('approved', 'published')
        ORDER BY c.created_at DESC`,
       [parseInt(shopId)]
     );
