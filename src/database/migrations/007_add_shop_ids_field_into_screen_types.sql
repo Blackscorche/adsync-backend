@@ -1,2 +1,2 @@
 ALTER TABLE screen_types 
-ADD COLUMN shop_ids INTEGER[] DEFAULT '{}';
+ADD COLUMN IF NOT EXISTS shop_ids INTEGER[] DEFAULT '{}';
