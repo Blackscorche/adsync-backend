@@ -56,6 +56,51 @@ router.get('/', authenticateToken, requireRole(['admin', 'design']), async (req,
   }
 });
 
+// Search shops by specific field
+router.get('/search', authenticateToken, requireRole(['admin', 'design']), async (req, res) => {
+  try {
+    const { field, text } = req.body;
+
+    const allowedFields = ['postcode', 'address', 'phone', 'city'];
+
+    if (!field || !text) {
+      return res.status(400).json({ error: 'Field and search text are required' });
+    }
+
+    if (!allowedFields.includes(field)) {
+      return res.status(400).json({ error: 'Invalid search field' });
+    }
+
+    const result = await pool.query(`
+      SELECT
+        s.id,
+        s.name,
+        s.address,
+        s.postcode,
+        s.city,
+        s.shop_type,
+        s.phone,
+        s.photo_url,
+        s.subscription_status,
+        s.created_at,
+        u.full_name as owner_name,
+        u.email as owner_email,
+        COUNT(DISTINCT sc.id) as screen_count
+      FROM shops s
+      LEFT JOIN users u ON s.owner_id = u.id
+      LEFT JOIN screens sc ON sc.shop_id = s.id
+      WHERE s.${field} ILIKE $1
+      GROUP BY s.id, u.full_name, u.email
+      ORDER BY s.created_at DESC
+    `, [`%${text}%`]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error searching shops:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Get single shop details
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
