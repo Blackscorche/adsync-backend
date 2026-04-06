@@ -228,12 +228,14 @@ router.post(
       // Create file URL using CDN
       const fileUrl = getFileUrl(req.file.key)
 
-      // Insert content record with charge information
+      const playlistScope = req.body.playlistScope || 'none'
+      const playlistScopeValue = req.body.playlistScopeValue || null
+
       const result = await client.query(
         `INSERT INTO content
        (shop_id, uploaded_by, original_filename, file_url, file_type, status,
-        was_free_upload, charge_amount)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        was_free_upload, charge_amount, playlist_scope, playlist_scope_value)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
         [
           shop.id,
@@ -244,6 +246,8 @@ router.post(
           'pending',
           wasFreeUpload,
           chargeAmount,
+          playlistScope,
+          playlistScopeValue,
         ]
       )
 
@@ -432,12 +436,14 @@ router.post(
       // Create file URL using CDN
       const fileUrl = getFileUrl(req.file.key)
 
-      // Insert content record with charge information
+      const playlistScope = req.body.playlistScope || 'none'
+      const playlistScopeValue = req.body.playlistScopeValue || null
+
       const result = await client.query(
         `INSERT INTO content
        (shop_id, uploaded_by, original_filename, file_url, file_type, status,
-        was_free_upload, charge_amount)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        was_free_upload, charge_amount, playlist_scope, playlist_scope_value)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
         [
           shop.id,
@@ -448,6 +454,8 @@ router.post(
           'pending',
           wasFreeUpload,
           chargeAmount,
+          playlistScope,
+          playlistScopeValue,
         ]
       )
 

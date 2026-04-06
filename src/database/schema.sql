@@ -39,7 +39,9 @@ CREATE TABLE users (
     phone VARCHAR(50),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    shop_id INTEGER
+    shop_id INTEGER,
+    reset_token VARCHAR(255),
+    reset_token_expires TIMESTAMP
 );
 
 -- Create shops table
@@ -71,6 +73,9 @@ CREATE TABLE shops (
 
 -- Add foreign key constraint for users.shop_id after shops table is created
 ALTER TABLE users ADD CONSTRAINT users_shop_id_fkey FOREIGN KEY (shop_id) REFERENCES shops(id);
+
+-- Index for password reset token lookups
+CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users(reset_token);
 
 -- Create screen_sizes table
 CREATE TABLE screen_sizes (
@@ -111,7 +116,9 @@ CREATE TABLE content (
     is_extra_upload BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     was_free_upload BOOLEAN DEFAULT false,
-    charge_amount NUMERIC DEFAULT 0.00
+    charge_amount NUMERIC DEFAULT 0.00,
+    playlist_scope VARCHAR(20) DEFAULT 'none',
+    playlist_scope_value TEXT
 );
 
 -- Create screens table
@@ -153,12 +160,25 @@ CREATE TABLE playlist_items (
     duration INTEGER DEFAULT 10
 );
 
--- Create screen_playlists table
+-- Create screen_playlists table (default/fallback assignment)
 CREATE TABLE screen_playlists (
     id SERIAL PRIMARY KEY,
     screen_id INTEGER UNIQUE REFERENCES screens(id),
     playlist_id INTEGER REFERENCES playlists(id),
     assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create playlist_schedules table (time-based assignments)
+CREATE TABLE IF NOT EXISTS playlist_schedules (
+    id SERIAL PRIMARY KEY,
+    screen_id INTEGER REFERENCES screens(id) ON DELETE CASCADE,
+    playlist_id INTEGER REFERENCES playlists(id) ON DELETE CASCADE,
+    schedule_name VARCHAR(50) NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(screen_id, schedule_name)
 );
 
 -- Create credit_transactions table
@@ -410,8 +430,32 @@ INSERT INTO system_settings (setting_key, setting_value, description) VALUES
     ('maintenance_mode', 'false', 'Maintenance mode status'),
     ('commission_percentage', '10', 'Sales commission percentage'),
     ('content_upload_price', '3.00', 'Price for content uploads after free monthly upload'),
-    ('content_monthly_price', '1.00', 'Monthly price per content item')
+    ('content_monthly_price', '1.00', 'Monthly price per content item'),
+    ('referral_reward_amount', '25', 'Referral reward amount in GBP')
 ON CONFLICT (setting_key) DO NOTHING;
+
+-- Create referrals table
+CREATE TABLE IF NOT EXISTS referrals (
+    id SERIAL PRIMARY KEY,
+    referrer_id INTEGER REFERENCES users(id),
+    referrer_name VARCHAR(255) NOT NULL,
+    friend_name VARCHAR(255) NOT NULL,
+    friend_phone VARCHAR(50) NOT NULL,
+    status VARCHAR(20) DEFAULT 'pending',
+    reward_amount NUMERIC,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create customer inquiries table
+CREATE TABLE IF NOT EXISTS customer_inquiries (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    phone VARCHAR(50) NOT NULL,
+    status VARCHAR(20) DEFAULT 'new',
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- Insert default users (passwords are hashed for 'password123')
 INSERT INTO users (email, password_hash, full_name, role) VALUES

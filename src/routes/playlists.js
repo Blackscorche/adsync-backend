@@ -366,6 +366,40 @@ router.delete('/:playlistId/items/:itemId', authenticateToken, requireRole(['des
   }
 });
 
+// Bulk remove items from playlist
+router.delete('/:playlistId/items', authenticateToken, requireRole(['design', 'admin']), async (req, res) => {
+  try {
+    const { playlistId } = req.params;
+    const { itemIds } = req.body;
+
+    if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
+      return res.status(400).json({ error: 'itemIds array is required' });
+    }
+
+    const result = await pool.query(
+      'DELETE FROM playlist_items WHERE playlist_id = $1 AND id = ANY($2::int[]) RETURNING id',
+      [playlistId, itemIds]
+    );
+
+    // Reorder remaining items
+    await pool.query(
+      `WITH numbered AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY position) - 1 AS new_position
+        FROM playlist_items
+        WHERE playlist_id = $1
+      )
+      UPDATE playlist_items SET position = numbered.new_position
+      FROM numbered WHERE playlist_items.id = numbered.id`,
+      [playlistId]
+    );
+
+    res.json({ message: `${result.rowCount} items removed from playlist` });
+  } catch (error) {
+    console.error('Error bulk removing items from playlist:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Update playlist items (positions and durations) - Designers only
 router.put('/:id/items', authenticateToken, requireRole(['design']), async (req, res) => {
   try {
@@ -593,6 +627,109 @@ router.get('/owner/:shopId', authenticateToken, requireRole(['owner']), async (r
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching owner playlists:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get schedules for a screen
+router.get('/schedules/:screenId', authenticateToken, async (req, res) => {
+  try {
+    const { screenId } = req.params;
+    const result = await pool.query(
+      `SELECT ps.*, p.name as playlist_name, p.status as playlist_status
+       FROM playlist_schedules ps
+       JOIN playlists p ON ps.playlist_id = p.id
+       WHERE ps.screen_id = $1
+       ORDER BY ps.start_time`,
+      [screenId]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching schedules:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Create or update a schedule for a screen
+router.post('/schedules', authenticateToken, requireRole(['owner', 'admin', 'design']), async (req, res) => {
+  try {
+    const { screenId, playlistId, scheduleName, startTime, endTime } = req.body;
+
+    if (!screenId || !playlistId || !scheduleName || !startTime || !endTime) {
+      return res.status(400).json({ error: 'All fields are required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO playlist_schedules (screen_id, playlist_id, schedule_name, start_time, end_time)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (screen_id, schedule_name)
+       DO UPDATE SET playlist_id = $2, start_time = $4, end_time = $5
+       RETURNING *`,
+      [screenId, playlistId, scheduleName, startTime, endTime]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating schedule:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Delete a schedule
+router.delete('/schedules/:id', authenticateToken, requireRole(['owner', 'admin', 'design']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM playlist_schedules WHERE id = $1 RETURNING id', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+
+    res.json({ message: 'Schedule deleted' });
+  } catch (error) {
+    console.error('Error deleting schedule:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Mobile: Get active playlist for screen based on schedule
+router.get('/schedules/:screenId/active', async (req, res) => {
+  try {
+    const { screenId } = req.params;
+
+    // Check for a time-based schedule first
+    const scheduleResult = await pool.query(
+      `SELECT ps.playlist_id, p.name as playlist_name
+       FROM playlist_schedules ps
+       JOIN playlists p ON ps.playlist_id = p.id
+       WHERE ps.screen_id = $1 AND ps.is_active = true
+       AND CURRENT_TIME BETWEEN ps.start_time AND ps.end_time
+       ORDER BY ps.start_time
+       LIMIT 1`,
+      [screenId]
+    );
+
+    if (scheduleResult.rows.length > 0) {
+      return res.json({ source: 'schedule', ...scheduleResult.rows[0] });
+    }
+
+    // Fallback to default screen_playlists assignment
+    const defaultResult = await pool.query(
+      `SELECT sp.playlist_id, p.name as playlist_name
+       FROM screen_playlists sp
+       JOIN playlists p ON sp.playlist_id = p.id
+       WHERE sp.screen_id = $1
+       LIMIT 1`,
+      [screenId]
+    );
+
+    if (defaultResult.rows.length > 0) {
+      return res.json({ source: 'default', ...defaultResult.rows[0] });
+    }
+
+    res.json({ source: 'none', playlist_id: null });
+  } catch (error) {
+    console.error('Error fetching active playlist:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

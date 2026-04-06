@@ -143,6 +143,8 @@ app.use('/api/design', require('./routes/design'))
 app.use('/api/notifications', require('./routes/notifications'))
 app.use('/api/promotion-types', require('./routes/promotionTypes'))
 // app.use('/api/support', require('./routes/support')); // Disabled - Support feature removed
+app.use('/api/inquiries', require('./routes/inquiries'))
+app.use('/api/referrals', require('./routes/referrals'))
 
 // Routes for Milestone 2
 app.use('/api/playlists', require('./routes/playlists'))
