@@ -211,7 +211,7 @@ router.get('/playlist', async (req, res) => {
 
 router.post('/playback', async (req, res) => {
   try {
-    const { shop_id, device_id, content_id } = req.body;
+    const { shop_id, device_id, content_id, content_name } = req.body;
 
     if (!shop_id || !device_id || !content_id) {
       return res.status(400).json({
@@ -219,6 +219,16 @@ router.post('/playback', async (req, res) => {
       });
     }
 
+    const screenResult = await pool.query(
+      'SELECT id FROM screens WHERE shop_id = $1 AND device_id = $2',
+      [shop_id, device_id]
+    );
+    const screenId = screenResult.rows[0]?.id || null;
+
+    await pool.query(
+      'INSERT INTO playback_logs (shop_id, screen_id, content_id, content_name) VALUES ($1, $2, $3, $4)',
+      [shop_id, screenId, content_id, content_name || null]
+    );
 
     res.json({ success: true });
   } catch (error) {
