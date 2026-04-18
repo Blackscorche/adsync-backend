@@ -45,14 +45,12 @@ router.post('/login', async (req, res) => {
 
     const screen = result.rows[0];
 
-    // Check if shop is approved
     if (screen.shop_status !== 'approved') {
       return res.status(403).json({
         error: 'Shop is not approved yet'
       });
     }
 
-    // Generate token for the device (optional, for future use)
     const token = jwt.sign(
       {
         screenId: screen.id,
@@ -64,7 +62,6 @@ router.post('/login', async (req, res) => {
       { expiresIn: '30d' }
     );
 
-    // Update screen status to active
     await pool.query(`
       UPDATE screens
       SET
@@ -107,7 +104,6 @@ router.post('/heartbeat', async (req, res) => {
       });
     }
 
-    // Update screen status and last heartbeat
     const result = await pool.query(`
       UPDATE screens
       SET
@@ -121,7 +117,6 @@ router.post('/heartbeat', async (req, res) => {
       return res.status(404).json({ error: 'Screen not found' });
     }
 
-    // Log current playing content if provided
     if (current_content) {
       console.log(`Screen ${device_id} playing: ${current_content.name} (ID: ${current_content.id})`);
     }
@@ -147,7 +142,6 @@ router.get('/playlist', async (req, res) => {
       });
     }
 
-    // Get screen and its assigned playlist
     const result = await pool.query(`
       SELECT
         s.id as screen_id,
@@ -178,7 +172,6 @@ router.get('/playlist', async (req, res) => {
       });
     }
 
-    // Get playlist items
     const itemsResult = await pool.query(`
       SELECT
         pi.id,
@@ -192,6 +185,8 @@ router.get('/playlist', async (req, res) => {
       FROM playlist_items pi
       JOIN content c ON pi.content_id = c.id
       WHERE pi.playlist_id = $1
+        AND (c.start_date IS NULL OR c.start_date <= CURRENT_DATE)
+        AND (c.end_date IS NULL OR c.end_date >= CURRENT_DATE)
       ORDER BY pi.position
     `, [screen.playlist_id]);
 
@@ -209,9 +204,7 @@ router.get('/playlist', async (req, res) => {
       }))
     });
   } catch (error) {
-    console.error('ERROR fetching mobile playlist:');
-    console.error('Error details:', error);
-    console.log('=== END GET PLAYLIST (ERROR) ===\n');
+    console.error('Error fetching mobile playlist:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

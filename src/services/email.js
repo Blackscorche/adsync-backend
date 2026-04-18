@@ -114,8 +114,8 @@ class EmailService {
           <p>New content has been uploaded by <strong>${content.shop_name}</strong> and is ready for your professional touch!</p>
           <h3>Content Details:</h3>
           <ul>
-            <li>Title: ${content.title}</li>
-            <li>Type: ${content.content_type}</li>
+            <li>File: ${content.original_filename}</li>
+            <li>Type: ${content.file_type}</li>
             <li>Uploaded: ${new Date(content.created_at).toLocaleDateString()}</li>
           </ul>
           <a href="${process.env.FRONTEND_URL}/design">View in Design Dashboard</a>

@@ -8,6 +8,7 @@ const {
   getFileUrl,
   getKeyFromUrl,
 } = require('../services/digitalOceanSpaces')
+const emailService = require('../services/email')
 
 const router = express.Router()
 
@@ -230,12 +231,15 @@ router.post(
 
       const playlistScope = req.body.playlistScope || 'none'
       const playlistScopeValue = req.body.playlistScopeValue || null
+      const startDate = req.body.startDate || null
+      const endDate = req.body.endDate || null
 
       const result = await client.query(
         `INSERT INTO content
        (shop_id, uploaded_by, original_filename, file_url, file_type, status,
-        was_free_upload, charge_amount, playlist_scope, playlist_scope_value)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        was_free_upload, charge_amount, playlist_scope, playlist_scope_value,
+        start_date, end_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
         [
           shop.id,
@@ -248,6 +252,8 @@ router.post(
           chargeAmount,
           playlistScope,
           playlistScopeValue,
+          startDate,
+          endDate,
         ]
       )
 
@@ -258,6 +264,8 @@ router.post(
       )
 
       await client.query('COMMIT')
+
+      emailService.sendNewContentNotification(result.rows[0].id).catch(() => {})
 
       const response = {
         message: wasFreeUpload
