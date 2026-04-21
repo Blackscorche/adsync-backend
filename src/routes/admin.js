@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const pool = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const emailService = require('../services/email');
+const { sendPushNotification } = require('../services/pushNotifications');
 
 const router = express.Router();
 
@@ -213,6 +214,11 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
                   $2::jsonb)`,
           [shop.owner_id, JSON.stringify({ shop_id: shopId })]
         );
+        await sendPushNotification(shop.owner_id, {
+          title: 'Shop Approved! 🎉',
+          body: `${shop.name} is now active. Start uploading content.`,
+          data: { type: 'shop_approved', shop_id: shopId },
+        });
 
         // Notify assigned designer
         await pool.query(
@@ -235,6 +241,11 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
            `${shop.name} has been rejected: ${rejection_reason}`,
            JSON.stringify({ shop_id: shopId, shop_name: shop.name, reason: rejection_reason })]
         );
+        await sendPushNotification(shop.registered_by, {
+          title: 'Shop Registration Update',
+          body: `${shop.name} was not approved. Tap for details.`,
+          data: { type: 'shop_rejected', shop_id: shopId },
+        });
 
         // Send rejection email
         await emailService.sendShopRejectionEmail(shopId, rejection_reason);

@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { sendPushNotification } = require('../services/pushNotifications');
 
 const router = express.Router();
 
@@ -275,6 +276,14 @@ router.post('/content/:id/publish', authenticateToken, requireRole(['design']), 
        FROM shops WHERE id = $2`,
       [JSON.stringify({ content_id: contentId }), shopData.shop_id]
     );
+    const ownerResult = await pool.query('SELECT owner_id FROM shops WHERE id = $1', [shopData.shop_id]);
+    if (ownerResult.rows[0]) {
+      await sendPushNotification(ownerResult.rows[0].owner_id, {
+        title: 'Content Published 🎬',
+        body: 'Your content is now live on screens.',
+        data: { type: 'content_published', content_id: contentId },
+      });
+    }
 
     res.json({
       message: 'Content published successfully',

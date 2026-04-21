@@ -1,8 +1,25 @@
 const express = require('express');
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const { Expo } = require('expo-server-sdk');
 
 const router = express.Router();
+
+router.post('/push-token', authenticateToken, async (req, res) => {
+  const { token } = req.body;
+  if (!token || !Expo.isExpoPushToken(token)) {
+    return res.status(400).json({ error: 'Invalid push token' });
+  }
+  try {
+    await pool.query(
+      'UPDATE users SET push_token = $1, push_token_updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [token, req.user.userId]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // Get notifications for current user
 router.get('/', authenticateToken, async (req, res) => {
