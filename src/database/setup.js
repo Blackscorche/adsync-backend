@@ -17,6 +17,7 @@ const path = require('path');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL?.includes('digitalocean.com') ||
+       process.env.DATABASE_URL?.includes('supabase.com') ||
        process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 

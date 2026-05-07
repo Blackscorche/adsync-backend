@@ -170,59 +170,66 @@ router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => 
       contract_end_date,
     } = req.body;
 
-    await pool.query('BEGIN');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    // Check if owner email exists
-    const existingUser = await pool.query(
-      'SELECT id FROM users WHERE email = $1',
-      [ownerEmail]
-    );
-
-    let ownerId;
-    
-    if (existingUser.rows.length > 0) {
-      ownerId = existingUser.rows[0].id;
-    } else {
-      // Create new owner user
-      const bcrypt = require('bcryptjs');
-      const passwordHash = await bcrypt.hash(ownerPassword, 10);
-      
-      const userResult = await pool.query(
-        'INSERT INTO users (email, password_hash, full_name, role) VALUES ($1, $2, $3, $4) RETURNING id',
-        [ownerEmail, passwordHash, ownerName, 'owner']
+      // Check if owner email exists
+      const existingUser = await client.query(
+        'SELECT id FROM users WHERE email = $1',
+        [ownerEmail]
       );
-      ownerId = userResult.rows[0].id;
+
+      let ownerId;
+      
+      if (existingUser.rows.length > 0) {
+        ownerId = existingUser.rows[0].id;
+      } else {
+        // Create new owner user
+        const bcrypt = require('bcryptjs');
+        const passwordHash = await bcrypt.hash(ownerPassword, 10);
+        
+        const userResult = await client.query(
+          'INSERT INTO users (email, password_hash, full_name, role) VALUES ($1, $2, $3, $4) RETURNING id',
+          [ownerEmail, passwordHash, ownerName, 'owner']
+        );
+        ownerId = userResult.rows[0].id;
+      }
+
+      // Create shop with new fields
+      const shopResult = await client.query(
+        `INSERT INTO shops (
+          name, 
+          owner_id, 
+          address, 
+          postcode,
+          shop_type,
+          phone,
+          contract_start_date,
+          contract_end_date
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [
+          name, 
+          ownerId, 
+          address, 
+          postcode,
+          shop_type,
+          phone,
+          contract_start_date || null,
+          contract_end_date || null
+        ]
+      );
+
+      await client.query('COMMIT');
+
+      res.status(201).json(shopResult.rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
-
-    // Create shop with new fields
-    const shopResult = await pool.query(
-      `INSERT INTO shops (
-        name, 
-        owner_id, 
-        address, 
-        postcode,
-        shop_type,
-        phone,
-        contract_start_date,
-        contract_end_date
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-      [
-        name, 
-        ownerId, 
-        address, 
-        postcode,
-        shop_type,
-        phone,
-        contract_start_date || null,
-        contract_end_date || null
-      ]
-    );
-
-    await pool.query('COMMIT');
-
-    res.status(201).json(shopResult.rows[0]);
   } catch (error) {
-    await pool.query('ROLLBACK');
     console.error('Error creating shop:', error);
     res.status(500).json({ error: 'Server error' });
   }

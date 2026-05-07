@@ -8,14 +8,14 @@ const router = express.Router();
 router.get('/', authenticateToken, async (req, res) => {
   try {
     let shopId;
-    
+
     if (req.user.role === 'owner') {
       // Get shop_id for the owner
       const shopResult = await pool.query(
         'SELECT id FROM shops WHERE owner_id = $1',
         [req.user.userId]
       );
-      
+
       if (shopResult.rows.length === 0) {
         return res.status(404).json({ error: 'Shop not found for this owner' });
       }
@@ -114,7 +114,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
         'SELECT id FROM shops WHERE owner_id = $1',
         [req.user.userId]
       );
-      
+
       if (shopResult.rows.length === 0 || shopResult.rows[0].id !== playlist.shop_id) {
         return res.status(403).json({ error: 'Access denied' });
       }
@@ -199,7 +199,7 @@ router.put('/:id', authenticateToken, requireRole(['design', 'admin']), async (r
          WHERE p.id = $1 AND s.owner_id = $2`,
         [id, req.user.userId]
       );
-      
+
       if (checkResult.rows.length === 0) {
         return res.status(403).json({ error: 'Access denied' });
       }
@@ -246,16 +246,16 @@ router.post('/:id/items', authenticateToken, requireRole(['design', 'admin']), a
       }
     }
 
-    // Verify content is approved and belongs to the same shop
+    // Verify content belongs to the same shop and is approved or published
     const contentCheck = await pool.query(
       `SELECT c.* FROM content c
        JOIN playlists p ON c.shop_id = p.shop_id
-       WHERE c.id = $1 AND p.id = $2 AND c.status = 'approved'`,
+       WHERE c.id = $1 AND p.id = $2 AND c.status IN ('approved', 'published')`,
       [content_id, id]
     );
 
     if (contentCheck.rows.length === 0) {
-      return res.status(400).json({ error: 'Content not found or not approved for this shop' });
+      return res.status(400).json({ error: 'Content not found or not approved/published for this shop' });
     }
 
     // Get the next position
@@ -295,27 +295,34 @@ router.put('/:id/items/reorder', authenticateToken, requireRole(['design', 'admi
          WHERE p.id = $1 AND s.owner_id = $2`,
         [id, req.user.userId]
       );
-      
+
       if (checkResult.rows.length === 0) {
         return res.status(403).json({ error: 'Access denied' });
       }
     }
 
     // Update positions in a transaction
-    await pool.query('BEGIN');
-    
-    for (const item of items) {
-      await pool.query(
-        'UPDATE playlist_items SET position = $1 WHERE id = $2 AND playlist_id = $3',
-        [item.position, item.id, id]
-      );
-    }
-    
-    await pool.query('COMMIT');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    res.json({ message: 'Playlist order updated successfully' });
+      for (const item of items) {
+        await client.query(
+          'UPDATE playlist_items SET position = $1 WHERE id = $2 AND playlist_id = $3',
+          [item.position, item.id, id]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      res.json({ message: 'Playlist order updated successfully' });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error) {
-    await pool.query('ROLLBACK');
     console.error('Error reordering playlist:', error);
     res.status(500).json({ error: 'Server error' });
   }
@@ -334,7 +341,7 @@ router.delete('/:playlistId/items/:itemId', authenticateToken, requireRole(['des
          WHERE p.id = $1 AND s.owner_id = $2`,
         [playlistId, req.user.userId]
       );
-      
+
       if (checkResult.rows.length === 0) {
         return res.status(403).json({ error: 'Access denied' });
       }
@@ -419,29 +426,36 @@ router.put('/:id/items', authenticateToken, requireRole(['design']), async (req,
     }
 
     // Clear existing items and add new ones in a transaction
-    await pool.query('BEGIN');
-
+    const client = await pool.connect();
     try {
-      // Delete all existing items for this playlist
-      await pool.query(
-        'DELETE FROM playlist_items WHERE playlist_id = $1',
-        [id]
-      );
+      await client.query('BEGIN');
 
-      // Insert new items
-      for (const item of items) {
-        await pool.query(
-          `INSERT INTO playlist_items (playlist_id, content_id, position, duration)
-           VALUES ($1, $2, $3, $4)`,
-          [id, item.content_id, item.position, item.duration]
+      try {
+        // Delete all existing items for this playlist
+        await client.query(
+          'DELETE FROM playlist_items WHERE playlist_id = $1',
+          [id]
         );
-      }
 
-      await pool.query('COMMIT');
-      res.json({ message: 'Playlist items updated successfully' });
+        // Insert new items
+        for (const item of items) {
+          await client.query(
+            `INSERT INTO playlist_items (playlist_id, content_id, position, duration)
+             VALUES ($1, $2, $3, $4)`,
+            [id, item.content_id, item.position, item.duration]
+          );
+        }
+
+        await client.query('COMMIT');
+        res.json({ message: 'Playlist items updated successfully' });
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      }
     } catch (error) {
-      await pool.query('ROLLBACK');
       throw error;
+    } finally {
+      client.release();
     }
   } catch (error) {
     console.error('Error updating playlist items:', error);
@@ -462,7 +476,7 @@ router.delete('/:id', authenticateToken, requireRole(['design', 'admin']), async
          WHERE p.id = $1 AND s.owner_id = $2`,
         [id, req.user.userId]
       );
-      
+
       if (checkResult.rows.length === 0) {
         return res.status(403).json({ error: 'Access denied' });
       }
@@ -509,7 +523,7 @@ router.post('/assign', authenticateToken, requireRole(['owner', 'admin']), async
          WHERE p.id = $1 AND s.id = $2 AND sh.owner_id = $3`,
         [playlist_id, screen_id, req.user.userId]
       );
-      
+
       if (parseInt(checkResult.rows[0].valid) === 0) {
         return res.status(403).json({ error: 'Access denied or invalid playlist/screen combination' });
       }

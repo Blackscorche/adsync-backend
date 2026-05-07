@@ -141,15 +141,17 @@ router.get('/shops/pending', authenticateToken, requireRole(['admin']), async (r
 
 // Approve or reject shop
 router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), async (req, res) => {
+  const client = await pool.connect();
   try {
     const shopId = req.params.id;
     const { status, rejection_reason, designer_id } = req.body;
+    const parsedDesignerId = designer_id ? parseInt(designer_id) : null;
 
     if (!['approved', 'rejected'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
 
-    if (status === 'approved' && !designer_id) {
+    if (status === 'approved' && !parsedDesignerId) {
       return res.status(400).json({ error: 'Designer assignment required for approval' });
     }
 
@@ -157,11 +159,11 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
       return res.status(400).json({ error: 'Rejection reason required' });
     }
 
-    await pool.query('BEGIN');
+    await client.query('BEGIN');
 
     try {
       // Update shop status
-      const shopResult = await pool.query(
+      const shopResult = await client.query(
         `UPDATE shops
          SET approval_status = $1,
              rejection_reason = $2,
@@ -174,7 +176,7 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
         [
           status,
           rejection_reason,
-          status === 'approved' ? designer_id : null,
+          status === 'approved' ? parsedDesignerId : null,
           req.user.userId,
           status === 'approved' ? 'active' : 'pending',
           shopId
@@ -182,7 +184,7 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
       );
 
       if (shopResult.rows.length === 0) {
-        await pool.query('ROLLBACK');
+        await client.query('ROLLBACK');
         return res.status(404).json({ error: 'Shop not found' });
       }
 
@@ -190,38 +192,45 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
 
       if (status === 'approved') {
         // Activate owner account
-        await pool.query(
+        await client.query(
           'UPDATE users SET is_active = true WHERE id = $1',
           [shop.owner_id]
         );
 
-        const commissionSettings = await pool.query(
+        const commissionSettings = await client.query(
           "SELECT setting_value FROM system_settings WHERE setting_key = 'commission_percentage'"
         );
         const commissionRate = parseFloat(commissionSettings.rows[0]?.setting_value || 10) / 100;
 
-        await pool.query(
+        await client.query(
           `INSERT INTO sales_commissions (sales_user_id, shop_id, commission_type, amount, percentage, status, month)
            VALUES ($1, $2, 'registration', 0, $3, 'pending', DATE_TRUNC('month', CURRENT_DATE))`,
           [shop.registered_by, shopId, commissionRate * 100]
         );
 
         // Notify owner
-        await pool.query(
+        await client.query(
           `INSERT INTO notifications (user_id, type, title, message, data)
            VALUES ($1, 'shop_approved', 'Shop Approved!',
                   'Your shop has been approved and is now active. You can start uploading content.',
                   $2::jsonb)`,
           [shop.owner_id, JSON.stringify({ shop_id: shopId })]
         );
-        await sendPushNotification(shop.owner_id, {
-          title: 'Shop Approved! 🎉',
-          body: `${shop.name} is now active. Start uploading content.`,
-          data: { type: 'shop_approved', shop_id: shopId },
-        });
+        
+        // We call these after the transaction or we ensure they don't crash the loop
+        // These service calls use their own pool connections internally
+        try {
+          await sendPushNotification(shop.owner_id, {
+            title: 'Shop Approved! 🎉',
+            body: `${shop.name} is now active. Start uploading content.`,
+            data: { type: 'shop_approved', shop_id: shopId },
+          });
+        } catch (pushErr) {
+          console.error('Non-critical push notification error:', pushErr);
+        }
 
         // Notify assigned designer
-        await pool.query(
+        await client.query(
           `INSERT INTO notifications (user_id, type, title, message, data)
            VALUES ($1, 'shop_assigned', 'New Shop Assigned',
                   $2, $3::jsonb)`,
@@ -229,11 +238,15 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
            JSON.stringify({ shop_id: shopId, shop_name: shop.name })]
         );
 
-        // Send approval email
-        await emailService.sendShopApprovalEmail(shopId);
+        // Send approval email (uses own connection)
+        try {
+          await emailService.sendShopApprovalEmail(shopId);
+        } catch (emailErr) {
+          console.error('Non-critical email error:', emailErr);
+        }
 
       } else {
-        await pool.query(
+        await client.query(
           `INSERT INTO notifications (user_id, type, title, message, data)
            VALUES ($1, 'shop_rejected', 'Shop Registration Rejected',
                   $2, $3::jsonb)`,
@@ -241,17 +254,26 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
            `${shop.name} has been rejected: ${rejection_reason}`,
            JSON.stringify({ shop_id: shopId, shop_name: shop.name, reason: rejection_reason })]
         );
-        await sendPushNotification(shop.registered_by, {
-          title: 'Shop Registration Update',
-          body: `${shop.name} was not approved. Tap for details.`,
-          data: { type: 'shop_rejected', shop_id: shopId },
-        });
+        
+        try {
+          await sendPushNotification(shop.registered_by, {
+            title: 'Shop Registration Update',
+            body: `${shop.name} was not approved. Tap for details.`,
+            data: { type: 'shop_rejected', shop_id: shopId },
+          });
+        } catch (pushErr) {
+          console.error('Non-critical push error:', pushErr);
+        }
 
-        // Send rejection email
-        await emailService.sendShopRejectionEmail(shopId, rejection_reason);
+        // Send rejection email (uses own connection)
+        try {
+          await emailService.sendShopRejectionEmail(shopId, rejection_reason);
+        } catch (emailErr) {
+          console.error('Non-critical email error:', emailErr);
+        }
       }
 
-      await pool.query('COMMIT');
+      await client.query('COMMIT');
 
       res.json({
         message: `Shop ${status} successfully`,
@@ -259,13 +281,15 @@ router.post('/shops/:id/approve', authenticateToken, requireRole(['admin']), asy
       });
 
     } catch (error) {
-      await pool.query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw error;
     }
 
   } catch (error) {
     console.error('Error approving shop:', error);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 

@@ -9,6 +9,12 @@ const billingScheduler = require('./services/billingScheduler')
 const app = express()
 const PORT = process.env.PORT || 5000
 
+// Request logging
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url}`);
+  next();
+});
+
 // Security middleware
 app.use(
   helmet({
@@ -98,6 +104,9 @@ app.use(express.urlencoded({ extended: true, limit: '100mb' }))
 
 // Middleware to add CORS headers for static files
 const staticCors = (req, res, next) => {
+  if (req.url.includes('uploads')) {
+    console.log(`[Static] Request for: ${req.url}`);
+  }
   res.header('Access-Control-Allow-Origin', '*')
   res.header('Access-Control-Allow-Methods', 'GET, OPTIONS')
   res.header(
@@ -108,12 +117,11 @@ const staticCors = (req, res, next) => {
   next()
 }
 
-// Static file serving is now handled by DigitalOcean Spaces + CDN
-// Keep logo serving for backward compatibility
+// Serve static files from the uploads directory
 app.use(
   '/uploads',
   staticCors,
-  express.static(path.join(__dirname, '../uploads'))
+  express.static(path.join(process.cwd(), 'uploads'))
 )
 
 // Routes with specific rate limiters
@@ -187,3 +195,4 @@ app.listen(PORT, () => {
   billingScheduler.start()
   console.log('  ✅ Billing scheduler started\n')
 })
+// trigger nodemon restart for real

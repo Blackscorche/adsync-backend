@@ -14,12 +14,20 @@ router.get('/test', (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { shop_id, device_id } = req.body;
+    console.log('--- MOBILE LOGIN REQUEST ---');
+    console.log('Body:', req.body);
+    console.log('Shop ID:', shop_id, '(Type:', typeof shop_id, ')');
+    console.log('Device ID:', device_id, '(Type:', typeof device_id, ')');
+    console.log('----------------------------');
 
     if (!shop_id || !device_id) {
       return res.status(400).json({
         error: 'Shop ID and Device ID are required'
       });
     }
+    const sId = shop_id.toString().trim();
+    const dId = device_id.toString().trim();
+
     const result = await pool.query(`
       SELECT
         s.id,
@@ -34,8 +42,8 @@ router.post('/login', async (req, res) => {
         sh.phone as shop_phone
       FROM screens s
       JOIN shops sh ON sh.id = s.shop_id
-      WHERE s.shop_id = $1 AND s.device_id = $2
-    `, [shop_id, device_id]);
+      WHERE s.shop_id = $1::integer AND s.device_id = $2
+    `, [parseInt(sId), dId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -142,6 +150,9 @@ router.get('/playlist', async (req, res) => {
       });
     }
 
+    const sId = shop_id.toString().trim();
+    const dId = device_id.toString().trim();
+
     const result = await pool.query(`
       SELECT
         s.id as screen_id,
@@ -152,10 +163,10 @@ router.get('/playlist', async (req, res) => {
       FROM screens s
       LEFT JOIN screen_playlists sp ON sp.screen_id = s.id
       LEFT JOIN playlists p ON p.id = sp.playlist_id
-      WHERE s.shop_id = $1 AND s.device_id = $2
+      WHERE s.shop_id = $1::integer AND s.device_id = $2
       ORDER BY sp.assigned_at DESC
       LIMIT 1
-    `, [shop_id, device_id]);
+    `, [parseInt(sId), dId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Screen not found' });

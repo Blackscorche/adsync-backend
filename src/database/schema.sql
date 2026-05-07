@@ -68,7 +68,14 @@ CREATE TABLE shops (
     credit_balance NUMERIC DEFAULT 0.00,
     payment_status VARCHAR(50) DEFAULT 'active',
     free_upload_used BOOLEAN DEFAULT false,
-    vat_number VARCHAR(50)
+    vat_number VARCHAR(50),
+    promotion_type VARCHAR(100),
+    wifi_connection VARCHAR(50),
+    wifi_distance VARCHAR(50),
+    cable_support VARCHAR(50),
+    cable_length VARCHAR(50),
+    display_fixed_at VARCHAR(100),
+    windows_photo_url VARCHAR(500)
 );
 
 -- Add foreign key constraint for users.shop_id after shops table is created

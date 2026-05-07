@@ -140,17 +140,18 @@ router.post(
       }
 
       // Start transaction
-      await pool.query('BEGIN')
-
+      const client = await pool.connect()
       try {
+        await client.query('BEGIN')
+
         // Check if email already exists
-        const existingUser = await pool.query(
+        const existingUser = await client.query(
           'SELECT id FROM users WHERE email = $1',
           [ownerEmail]
         )
 
         if (existingUser.rows.length > 0) {
-          await pool.query('ROLLBACK')
+          await client.query('ROLLBACK')
           return res.status(400).json({ error: 'Email already registered' })
         }
 
@@ -158,7 +159,7 @@ router.post(
         const passwordHash = await bcrypt.hash(ownerPassword, 10)
         const fullName = `${ownerFirstName} ${ownerLastName}`
 
-        const ownerResult = await pool.query(
+        const ownerResult = await client.query(
           `INSERT INTO users (email, password_hash, full_name, role, phone, is_active)
            VALUES ($1, $2, $3, 'owner', $4, false)
            RETURNING id`,
@@ -171,7 +172,7 @@ router.post(
         const photoUrl = req.file ? getFileUrl(req.file.key) : null
 
         // Create shop (pending approval)
-        const shopResult = await pool.query(
+        const shopResult = await client.query(
           `INSERT INTO shops (
             name, owner_id, registered_by, address, city, postcode,
             phone, shop_type, approval_status, photo_url, subscription_status,
@@ -203,13 +204,13 @@ router.post(
         const shopId = shopResult.rows[0].id
 
         // Update user with shop_id reference
-        await pool.query('UPDATE users SET shop_id = $1 WHERE id = $2', [
+        await client.query('UPDATE users SET shop_id = $1 WHERE id = $2', [
           shopId,
           ownerId,
         ])
 
         // Create notification for admin
-        await pool.query(
+        await client.query(
           `INSERT INTO notifications (user_id, type, title, message, data)
            SELECT id, 'shop_registered', 'New Shop Registration',
                   $1, $2::jsonb
@@ -220,7 +221,7 @@ router.post(
           ]
         )
 
-        await pool.query('COMMIT')
+        await client.query('COMMIT')
 
         res.status(201).json({
           message: 'Shop registered successfully and pending admin approval',
@@ -228,8 +229,10 @@ router.post(
           status: 'pending',
         })
       } catch (error) {
-        await pool.query('ROLLBACK')
+        await client.query('ROLLBACK')
         throw error
+      } finally {
+        client.release()
       }
     } catch (error) {
       console.error('Error registering shop:', error)

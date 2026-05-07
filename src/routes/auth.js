@@ -44,11 +44,11 @@ router.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign(
-      { 
-        userId: user.id, 
+      {
+        userId: user.id,
         email: user.email,
         role: user.role,
-        shopId: shopId 
+        shopId: shopId
       },
       process.env.JWT_SECRET || 'your-secret-key-here',
       { expiresIn: '24h' }

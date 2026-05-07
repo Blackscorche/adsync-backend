@@ -265,7 +265,7 @@ router.post(
 
       await client.query('COMMIT')
 
-      emailService.sendNewContentNotification(result.rows[0].id).catch(() => {})
+      emailService.sendNewContentNotification(result.rows[0].id).catch(() => { })
 
       const response = {
         message: wasFreeUpload
@@ -295,11 +295,12 @@ router.post(
   }
 )
 
-// Designer uploads his own design
+// Designer uploads content directly – no billing, published immediately, auto-added to playlist
+// Supports scoping: 'shop', 'shop_type', 'all'
 router.post(
   '/upload/designer/:id',
   authenticateToken,
-  requireRole(['design']),
+  requireRole(['design', 'admin']),
   contentUpload.single('file'),
   async (req, res) => {
     let client
@@ -310,126 +311,33 @@ router.post(
         return res.status(400).json({ error: 'No file uploaded' })
       }
 
+      const scope = req.body.playlistScope || 'shop'
+      const scopeValue = req.body.playlistScopeValue || null
+      const shopId = req.body.shopId ? parseInt(req.body.shopId, 10) : null
+
       await client.query('BEGIN')
 
-      // Get shop details including credit balance and payment status
-      // FOR UPDATE locks the row to prevent race conditions with concurrent uploads
-      const shopResult = await client.query(
-        `SELECT id, credit_balance, payment_status, free_upload_used
-       FROM shops
-       WHERE id = $1
-       FOR UPDATE`,
-        [parseInt(req.body.shopId, 10)]
-      )
+      // 1. Identify target shops based on scope
+      let targetShopIds = []
 
-      if (shopResult.rows.length === 0) {
-        // Delete file from Spaces if shop not found
-        await deleteFile(req.file.key)
-        await client.query('ROLLBACK')
-        return res.status(404).json({ error: 'Shop not found for this owner' })
-      }
-
-      const shop = shopResult.rows[0]
-
-      console.log(shop)
-
-      // Check if shop is active
-      if (shop.payment_status !== 'active') {
-        // Delete file from Spaces if shop inactive
-        await deleteFile(req.file.key)
-        await client.query('ROLLBACK')
-        return res.status(403).json({
-          error: 'Shop is inactive. Please pay outstanding bills to continue.',
-          payment_status: shop.payment_status,
-        })
-      }
-
-      // Get content upload price from settings
-      const uploadPriceSettings = await client.query(
-        "SELECT setting_value FROM system_settings WHERE setting_key = 'content_upload_price'"
-      )
-      const UPLOAD_COST = parseFloat(
-        uploadPriceSettings.rows[0]?.setting_value || 3.0
-      )
-      let chargeAmount = 0
-      let wasFreeUpload = false
-
-      const monthlyUploadResult = await client.query(
-        `SELECT COUNT(*) as count
-       FROM content
-       WHERE shop_id = $1
-       AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
-       AND created_at < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-       AND was_free_upload = true`,
-        [shop.id]
-      )
-
-      const hasUsedFreeUpload = parseInt(monthlyUploadResult.rows[0].count) > 0
-
-      if (!hasUsedFreeUpload) {
-        wasFreeUpload = true
-        chargeAmount = 0
+      if (scope === 'all') {
+        const allShops = await client.query('SELECT id FROM shops WHERE approval_status = \'approved\'')
+        targetShopIds = allShops.rows.map(s => s.id)
+      } else if (scope === 'type' && scopeValue) {
+        const typeShops = await client.query('SELECT id FROM shops WHERE shop_type = $1 AND approval_status = \'approved\'', [scopeValue])
+        targetShopIds = typeShops.rows.map(s => s.id)
       } else {
-        if (shop.credit_balance < UPLOAD_COST) {
-          await deleteFile(req.file.key)
-          await client.query('ROLLBACK')
-          return res.status(402).json({
-            error: 'Insufficient credit balance. Please top up to continue.',
-            required_amount: UPLOAD_COST,
-            current_balance: parseFloat(shop.credit_balance),
-            message: `You need at least £${UPLOAD_COST.toFixed(2)} credit to upload additional content`,
-          })
+        // Default to single shop
+        if (!shopId || isNaN(shopId)) {
+          throw new Error('Valid shop ID is required for shop-specific upload')
         }
+        targetShopIds = [shopId]
+      }
 
-        const deductResult = await client.query(
-          'SELECT deduct_credit($1, $2, $3, $4) as success',
-          [shop.id, UPLOAD_COST, 'upload_charge', 'Content upload']
-        )
-
-        if (!deductResult.rows[0].success) {
-          await deleteFile(req.file.key)
-          await client.query('ROLLBACK')
-          return res.status(402).json({
-            error: 'Failed to deduct credit. Please try again.',
-            current_balance: parseFloat(shop.credit_balance),
-          })
-        }
-
-        chargeAmount = UPLOAD_COST
-
-        // Get commission percentage from settings
-        const commissionSettings = await client.query(
-          "SELECT setting_value FROM system_settings WHERE setting_key = 'commission_percentage'"
-        )
-        const commissionPercentage =
-          parseFloat(commissionSettings.rows[0]?.setting_value || 10) / 100
-
-        // Calculate sales commission for paid uploads
-        const shopDetails = await client.query(
-          'SELECT registered_by FROM shops WHERE id = $1',
-          [shop.id]
-        )
-
-        if (shopDetails.rows[0]?.registered_by) {
-          const commissionAmount = UPLOAD_COST * commissionPercentage
-
-          await client.query(
-            `
-          INSERT INTO sales_commissions (
-            sales_user_id, shop_id, commission_type, amount,
-            percentage, status, month, description
-          )
-          VALUES ($1, $2, 'content', $3, $4, 'approved', DATE_TRUNC('month', CURRENT_DATE), $5)
-        `,
-            [
-              shopDetails.rows[0].registered_by,
-              shop.id,
-              commissionAmount,
-              commissionPercentage * 100,
-              `${commissionPercentage * 100}% of content upload (£${UPLOAD_COST.toFixed(2)})`,
-            ]
-          )
-        }
+      if (targetShopIds.length === 0) {
+        await deleteFile(req.file.key)
+        await client.query('ROLLBACK')
+        return res.status(404).json({ error: 'No matching shops found for the selected scope' })
       }
 
       // Determine file type
@@ -441,53 +349,80 @@ router.post(
         fileType = 'pdf'
       }
 
-      // Create file URL using CDN
       const fileUrl = getFileUrl(req.file.key)
+      const startDate = req.body.startDate || null
+      const endDate = req.body.endDate || null
 
-      const playlistScope = req.body.playlistScope || 'none'
-      const playlistScopeValue = req.body.playlistScopeValue || null
+      const createdContent = []
 
-      const result = await client.query(
-        `INSERT INTO content
-       (shop_id, uploaded_by, original_filename, file_url, file_type, status,
-        was_free_upload, charge_amount, playlist_scope, playlist_scope_value)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-        [
-          shop.id,
-          req.user.userId,
-          req.file.originalname,
-          fileUrl,
-          fileType,
-          'pending',
-          wasFreeUpload,
-          chargeAmount,
-          playlistScope,
-          playlistScopeValue,
-        ]
-      )
+      // 2. Distribute content to each target shop
+      for (const tShopId of targetShopIds) {
+        // Insert content record for this shop
+        const contentResult = await client.query(
+          `INSERT INTO content
+           (shop_id, uploaded_by, original_filename, file_url, file_type, status,
+            was_free_upload, charge_amount, playlist_scope, playlist_scope_value,
+            published_by, published_at, start_date, end_date)
+           VALUES ($1, $2, $3, $4, $5, 'published', false, 0, $6, $7, $8, CURRENT_TIMESTAMP, $9, $10)
+           RETURNING *`,
+          [
+            tShopId,
+            req.user.userId,
+            req.file.originalname,
+            fileUrl,
+            fileType,
+            scope,
+            scopeValue,
+            req.user.userId,
+            startDate,
+            endDate
+          ]
+        )
+        const contentRecord = contentResult.rows[0]
+        createdContent.push(contentRecord)
 
-      // Get updated balance
-      const updatedShopResult = await client.query(
-        'SELECT credit_balance FROM shops WHERE id = $1',
-        [shop.id]
-      )
+        // 3. Handle playlist assignment for this shop
+        let playlistResult = await client.query(
+          `SELECT id FROM playlists WHERE shop_id = $1 AND status = 'active' ORDER BY created_at ASC LIMIT 1`,
+          [tShopId]
+        )
+
+        let playlistId
+        if (playlistResult.rows.length === 0) {
+          // Create default active playlist if none exists
+          const newPlaylist = await client.query(
+            `INSERT INTO playlists (name, shop_id, created_by, status)
+             VALUES ('Default Playlist', $1, $2, 'active')
+             RETURNING id`,
+            [tShopId, req.user.userId]
+          )
+          playlistId = newPlaylist.rows[0].id
+        } else {
+          playlistId = playlistResult.rows[0].id
+        }
+
+        // Append to playlist items
+        const posResult = await client.query(
+          `SELECT COALESCE(MAX(position), 0) + 1 AS next_pos FROM playlist_items WHERE playlist_id = $1`,
+          [playlistId]
+        )
+        const nextPos = posResult.rows[0].next_pos
+
+        await client.query(
+          `INSERT INTO playlist_items (playlist_id, content_id, position, duration) VALUES ($1, $2, $3, 10)`,
+          [playlistId, contentRecord.id, nextPos]
+        )
+      }
 
       await client.query('COMMIT')
 
-      const response = {
-        message: wasFreeUpload
-          ? 'Content uploaded successfully (free monthly upload)'
-          : `Content uploaded successfully (£${chargeAmount.toFixed(2)} charged)`,
-        content: result.rows[0],
-        credit_balance: parseFloat(updatedShopResult.rows[0].credit_balance),
-        charge: chargeAmount,
-        was_free: wasFreeUpload,
-      }
-
-      res.status(201).json(response)
+      res.status(201).json({
+        message: `Content successfully distributed to ${targetShopIds.length} shop(s)`,
+        content_count: targetShopIds.length,
+        first_content: createdContent[0],
+      })
     } catch (error) {
-      console.error('Upload error:', error.message)
+      console.error('Designer upload error:', error.message)
       if (client) {
         await client.query('ROLLBACK')
       }
