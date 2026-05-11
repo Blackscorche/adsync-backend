@@ -12,22 +12,25 @@ const router = express.Router();
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-
+    console.log(`[Login] Attempt for: ${email}`);
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password required' });
     }
-
     const result = await pool.query(
       'SELECT id, email, password_hash, full_name, role FROM users WHERE LOWER(email) = LOWER($1) AND is_active = true',
       [email]
     );
 
     if (result.rows.length === 0) {
+      console.log(`[Login] User not found or inactive: ${email}`);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const user = result.rows[0];
+    console.log(`[Login] User found: ${user.email}, role: ${user.role}`);
+    
     const validPassword = await bcrypt.compare(password, user.password_hash);
+    console.log(`[Login] Password valid: ${validPassword}`);
 
     if (!validPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -41,8 +44,10 @@ router.post('/login', async (req, res) => {
         [user.id]
       );
       shopId = shopResult.rows[0]?.id;
+      console.log(`[Login] Shop ID for owner: ${shopId}`);
     }
 
+    console.log('[Login] Signing JWT...');
     const token = jwt.sign(
       {
         userId: user.id,
@@ -53,6 +58,7 @@ router.post('/login', async (req, res) => {
       process.env.JWT_SECRET || 'your-secret-key-here',
       { expiresIn: '24h' }
     );
+    console.log('[Login] JWT signed successfully');
 
     const response = {
       success: true,
@@ -69,8 +75,8 @@ router.post('/login', async (req, res) => {
     res.json(response);
 
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'Server error' });
+    console.error('[Login] CRITICAL ERROR:', error);
+    res.status(500).json({ error: 'Server error', details: error.message });
   }
 });
 

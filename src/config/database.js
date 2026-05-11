@@ -8,9 +8,10 @@ const pool = new Pool({
   },
   max: 10,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 15000, // 15 seconds for Neon databases to wake up
-  query_timeout: 10000, // 10 second query timeout
+  connectionTimeoutMillis: 15000,
+  query_timeout: 10000,
   statement_timeout: 10000,
+  keepAlive: true, // Help keep connections active
 });
 
 let hasLoggedConnection = false;
@@ -23,8 +24,8 @@ pool.on('connect', () => {
 });
 
 pool.on('error', (err) => {
-  console.error('❌ Unexpected database error:', err);
-  process.exit(-1);
+  console.error('❌ Unexpected database error (Handled):', err.message);
+  // Do NOT exit the process, let the pool handle reconnection
 });
 
 module.exports = pool;

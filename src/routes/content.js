@@ -72,16 +72,8 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 })
 
-// Handle OPTIONS preflight for upload endpoint
-router.options('/upload', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*')
-  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.header(
-    'Access-Control-Allow-Headers',
-    'Origin, X-Requested-With, Content-Type, Accept, Authorization'
-  )
-  res.status(200).end()
-})
+// Routes for content management
+// Global CORS middleware in index.js handles preflights and headers now
 
 router.post(
   '/upload',
