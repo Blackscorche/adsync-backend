@@ -9,6 +9,29 @@ const billingScheduler = require('./services/billingScheduler')
 const app = express()
 const PORT = process.env.PORT || 5000
 
+// 1. MUST BE FIRST: Manual CORS middleware
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  console.log(`[DEBUG] Incoming Request: ${req.method} ${req.url}`);
+  console.log(`[DEBUG] Origin: ${origin}`);
+  console.log(`[DEBUG] Headers: ${JSON.stringify(req.headers)}`);
+
+  // Allow all origins for debugging
+  res.header('Access-Control-Allow-Origin', origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, ngrok-skip-browser-warning, x-requested-with');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+
+  // Handle preflight (OPTIONS)
+  if (req.method === 'OPTIONS') {
+    console.log('[DEBUG] Responding to OPTIONS preflight');
+    return res.status(200).send();
+  }
+
+  next();
+});
+
 // Request logging
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.url}`);
@@ -22,33 +45,9 @@ app.use(
     contentSecurityPolicy: false, // Disable CSP for now to avoid blocking resources
   })
 )
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true)
 
-      // Parse multiple frontend URLs from environment variable
-      const allowedOrigins = process.env.FRONTEND_URLS
-        ? process.env.FRONTEND_URLS.split(',').map((url) => url.trim())
-        : ['http://localhost:3000']
-
-      // Check if origin is allowed
-      const isAllowed =
-        allowedOrigins.some((allowed) => origin === allowed) ||
-        origin.includes('localhost') || // Allow all localhost for development
-        origin.includes('10.0.2') || // Allow Android emulator
-        origin.startsWith('exp://') // Allow Expo client
-
-      callback(null, isAllowed)
-    },
-    credentials: true,
-  })
-)
-
-// Trust proxy for production (to handle X-Forwarded-For headers)
-if (process.env.NODE_ENV === 'production') {
-  app.set('trust proxy', 1)
-}
+// MUST trust proxy for ngrok and rate limiting to work correctly
+app.set('trust proxy', 1)
 
 // Rate limiting - Different limits for different endpoints
 const generalLimiter = rateLimit({
@@ -65,7 +64,7 @@ const uploadLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 login attempts per 15 minutes
+  max: 100, // Increased to 100 to prevent lockout during testing
   message: 'Too many login attempts from this IP, please try again later.',
 })
 
@@ -182,7 +181,7 @@ app.use((err, req, res, next) => {
 })
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`
   🚀 Ivaa AdSync Backend Server
   ================================
@@ -195,4 +194,9 @@ app.listen(PORT, () => {
   billingScheduler.start()
   console.log('  ✅ Billing scheduler started\n')
 })
+
+// Increase timeout for large file uploads (5 minutes)
+server.timeout = 300000;
+server.keepAliveTimeout = 300000;
+server.headersTimeout = 305000; // Slightly higher than keepAliveTimeout
 // trigger nodemon restart for real

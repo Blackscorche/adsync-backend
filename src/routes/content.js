@@ -714,9 +714,21 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       ) {
         return res.status(403).json({ error: 'Access denied' })
       }
+    } else if (req.user.role === 'design') {
+      const shopResult = await pool.query(
+        'SELECT id FROM shops WHERE id = $1 AND designer_id = $2',
+        [content.shop_id, req.user.userId]
+      )
+
+      if (shopResult.rows.length === 0) {
+        return res.status(403).json({ error: 'Access denied: You are not assigned to this shop' })
+      }
     } else if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Access denied' })
     }
+
+    // Update any screens using this content as current_content_id to NULL
+    await pool.query('UPDATE screens SET current_content_id = NULL WHERE current_content_id = $1', [id])
 
     // Delete file from DigitalOcean Spaces
     const fileKey = getKeyFromUrl(content.file_url)
